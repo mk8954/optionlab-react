@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predeploy" : "npm run build",
-    "deploy" : "gh-pages -d dist",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
@@ -17,6 +17,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/react": "^19.2.17",
@@ -26,6 +27,7 @@
     "eslint": "^10.6.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
+    "gh-pages": "^6.3.0",
     "globals": "^17.7.0",
     "postcss": "^8.5.25",
     "tailwindcss": "^4.3.3",
