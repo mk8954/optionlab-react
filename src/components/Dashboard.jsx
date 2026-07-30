@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Settings2, Home, Briefcase, ArrowLeftRight, BarChart2, MoreHorizontal, Lightbulb, ChevronRight, Eye, EyeOff, ArrowUp, ArrowDown, X } from 'lucide-react';
-// Import the logo directly so Vite guarantees the path works
 import AppLogo from '../assets/logo.png';
 
 export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, onSelectIndex, marketParameters, onUpdateParameters }) {
@@ -13,6 +12,46 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [configMode, setConfigMode] = useState('values');
 
+  // Exact Expiry Calculation Function
+  const calculateDefaultExpiries = () => {
+    const today = new Date('2026-07-30');
+
+    const getNextWeekday = (fromDate, targetDay) => {
+      const d = new Date(fromDate);
+      let day = d.getDay();
+      let diff = (targetDay + 7 - day) % 7;
+      if (diff === 0) diff = 7;
+      d.setDate(d.getDate() + diff);
+      return d.toISOString().split('T')[0];
+    };
+
+    const getLastTuesdayOfMonth = (fromDate) => {
+      const year = fromDate.getFullYear();
+      const month = fromDate.getMonth();
+      const lastDay = new Date(year, month + 1, 0);
+      let day = lastDay.getDay();
+      let diff = (day - 2 + 7) % 7;
+      lastDay.setDate(lastDay.getDate() - diff);
+      if (lastDay < fromDate) {
+        const nextMonthLastDay = new Date(year, month + 2, 0);
+        let nDay = nextMonthLastDay.getDay();
+        let nDiff = (nDay - 2 + 7) % 7;
+        nextMonthLastDay.setDate(nextMonthLastDay.getDate() - nDiff);
+        return nextMonthLastDay.toISOString().split('T')[0];
+      }
+      return lastDay.toISOString().split('T')[0];
+    };
+
+    return {
+      NIFTY: getNextWeekday(today, 2),        // Tuesday
+      SENSEX: getNextWeekday(today, 4),       // Thursday
+      BANKNIFTY: getLastTuesdayOfMonth(today), // Last Tuesday of month
+      FINNIFTY: getLastTuesdayOfMonth(today)  // Last Tuesday of month
+    };
+  };
+
+  const calculatedExpiries = calculateDefaultExpiries();
+
   const [formValues, setFormValues] = useState({
     NIFTY: marketParameters?.NIFTY?.price || '24358.15',
     BANKNIFTY: marketParameters?.BANKNIFTY?.price || '52945.00',
@@ -21,10 +60,10 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
   });
 
   const [formExpiries, setFormExpiries] = useState({
-    NIFTY: marketParameters?.NIFTY?.expiry || '2026-08-04',
-    BANKNIFTY: marketParameters?.BANKNIFTY?.expiry || '2026-08-25',
-    FINNIFTY: marketParameters?.FINNIFTY?.expiry || '2026-08-25',
-    SENSEX: marketParameters?.SENSEX?.expiry || '2026-08-06'
+    NIFTY: marketParameters?.NIFTY?.expiry || calculatedExpiries.NIFTY,
+    BANKNIFTY: marketParameters?.BANKNIFTY?.expiry || calculatedExpiries.BANKNIFTY,
+    FINNIFTY: marketParameters?.FINNIFTY?.expiry || calculatedExpiries.FINNIFTY,
+    SENSEX: marketParameters?.SENSEX?.expiry || calculatedExpiries.SENSEX
   });
 
   const PREV_CLOSES = {
@@ -37,17 +76,8 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
   const formatExpiryDisplay = (dateString) => {
     if (!dateString) return 'Tue';
     const targetDate = new Date(dateString);
-    const today = new Date('2026-07-30');
-
-    const diffTime = targetDate - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Tomorrow';
-    if (diffDays > 1 && diffDays < 7) {
-      return targetDate.toLocaleDateString('en-US', { weekday: 'long' });
-    }
-    return targetDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${String(targetDate.getDate()).padStart(2, '0')} ${months[targetDate.getMonth()]}`;
   };
 
   const indices = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX'].map(name => {
@@ -62,7 +92,7 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
       change: Math.abs(pointChange).toFixed(2),
       pct: Math.abs(pctChange).toFixed(2),
       isDown: pointChange < 0,
-      expiryRaw: formExpiries[name]
+      expiryRaw: (marketParameters && marketParameters[name]?.expiry) || formExpiries[name]
     };
   });
 
@@ -75,8 +105,6 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
     setSelectedMarket(marketName);
     if (onSelectIndex) {
       onSelectIndex(marketName);
-    } else if (onNavigateToTrade) {
-      onNavigateToTrade();
     }
   };
 
@@ -100,9 +128,8 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
 
   return (
     <>
-      <style>{"\n        .hide-scrollbar::-webkit-scrollbar { display: none; }\n        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }\n        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');\n        /* Hide number input spinners globally */\n        input[type=\"number\"]::-webkit-inner-spin-button,\n        input[type=\"number\"]::-webkit-outer-spin-button {\n          -webkit-appearance: none;\n          margin: 0;\n        }\n        input[type=\"number\"] {\n          -moz-appearance: textfield;\n        }\n      "}</style>
+      <style>{"\n        .hide-scrollbar::-webkit-scrollbar { display: none; }\n        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }\n        input[type=\"number\"]::-webkit-inner-spin-button,\n        input[type=\"number\"]::-webkit-outer-spin-button {\n          -webkit-appearance: none;\n          margin: 0;\n        }\n        input[type=\"number\"] {\n          -moz-appearance: textfield;\n        }\n      "}</style>
 
-      {/* Pitch perfect Navy Background (#141824) matching your image */}
       <div className="flex flex-col h-screen w-full sm:max-w-md sm:mx-auto bg-[#141824] text-[#E8EAED] font-sans relative overflow-hidden">
 
         <header className="px-5 py-4 flex items-center justify-between bg-[#141824] shrink-0 z-20">
@@ -131,9 +158,9 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto pb-24 hide-scrollbar">
+        {/* Scrollable content area with padding bottom so it doesn't get hidden behind the fixed navbar */}
+        <div className="flex-1 overflow-y-auto pb-28 hide-scrollbar">
 
-          {/* Dashboard Balance Card - Exact Match to 1000322222.png */}
           <div className="px-4 pt-1 mb-6">
             <div className="bg-gradient-to-br from-[#1b202e] to-[#151925] border border-[#252b3d] rounded-2xl p-5 shadow-lg relative overflow-hidden">
 
@@ -193,7 +220,7 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
                     </div>
 
                     <div className="flex justify-between items-center w-full mt-1">
-                      <span className="bg-[#10141a] border border-[#252b3d] text-[#828b9d] text-[10px] px-2 py-0.5 rounded font-semibold">Expiry {displayExpiry}</span>
+                      <span className="bg-[#10141a] border border-[#252b3d] text-[#828b9d] text-[10px] px-2 py-0.5 rounded font-semibold">Exp {displayExpiry}</span>
                       <span className={"text-[11px] font-semibold " + (idx.isDown ? "text-[#FF5C5C]" : "text-[#00D9B5]")}>
                         {idx.isDown ? "-" : "+"}{idx.change} ({idx.isDown ? "-" : "+"}{idx.pct}%)
                       </span>
@@ -255,7 +282,6 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
           </div>
         </div>
 
-        {/* Modal without spinners and with backdrop click handling */}
         {showConfigModal && (
           <div id="modal-backdrop" onClick={handleBackdropClick} className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-[#181c2a] border border-[#252b3d] w-full max-w-sm rounded-3xl p-5 shadow-2xl relative animate-in fade-in duration-200 max-h-[90vh] overflow-y-auto hide-scrollbar" onClick={(e) => e.stopPropagation()}>
@@ -336,6 +362,7 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
           </div>
         )}
 
+        {/* FIXED BOTTOM TASKBAR (Locked permanently, never scrolls) */}
         <nav className="absolute bottom-0 left-0 right-0 w-full bg-[#141824] border-t border-[#252b3d] flex justify-around items-center h-[72px] pb-safe z-40">
           <button className="flex flex-col items-center justify-center w-16 h-full text-[#00D9B5] focus:outline-none">
             <Home className="w-5 h-5 mb-1" />

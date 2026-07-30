@@ -2,24 +2,24 @@ import React, { useState } from 'react';
 import Dashboard from './components/Dashboard';
 import OptionChain from './components/OptionChain';
 import TradeScreen from './components/TradeScreen';
+import { Settings2, X } from 'lucide-react';
 
 function App() {
-  // Navigation State
   const [currentScreen, setCurrentScreen] = useState('dashboard');
-
-  // Data States
   const [selectedMarket, setSelectedMarket] = useState('NIFTY');
   const [selectedOption, setSelectedOption] = useState(null);
 
-  // Global Centralized Market Parameters (Shared between Dashboard and OptionChain)
+  // Modal State Moved Here
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configMode, setConfigMode] = useState('values');
+
   const [marketParams, setMarketParams] = useState({
     NIFTY: { price: '24358.15', expiry: '2026-08-04' },
-    BANKNIFTY: { price: '52945.00', expiry: '2026-08-05' },
-    FINNIFTY: { price: '23800.00', expiry: '2026-08-03' },
+    BANKNIFTY: { price: '52945.00', expiry: '2026-08-25' },
+    FINNIFTY: { price: '23800.00', expiry: '2026-08-25' },
     SENSEX: { price: '77627.50', expiry: '2026-08-06' }
   });
 
-  // Receives changes from Dashboard settings and updates globally
   const handleUpdateParams = (newParams) => {
     setMarketParams({
       NIFTY: { price: newParams.values.NIFTY, expiry: newParams.expiries.NIFTY },
@@ -29,52 +29,49 @@ function App() {
     });
   };
 
-  // Navigate to Option Chain and pre-select the tapped market
-  const navigateToOptionChain = (market = 'NIFTY') => {
-    setSelectedMarket(market);
-    setCurrentScreen('optionChain');
-  };
-
-  // Navigate to Trade Screen and pass the exact option contract clicked
-  const handleSelectOption = (optionData) => {
-    setSelectedOption(optionData);
-    setCurrentScreen('trade');
-  };
-
   return (
     <div className="bg-[#141824] min-h-screen">
 
-      {/* 1. DASHBOARD */}
       {currentScreen === 'dashboard' && (
         <Dashboard
-          onNavigateToTrade={() => navigateToOptionChain(selectedMarket)}
-          onNavigateToPositions={() => alert("Positions page coming next!")}
-          onSelectIndex={navigateToOptionChain}
+          onNavigateToTrade={() => setCurrentScreen('optionChain')}
+          onNavigateToPositions={() => alert("Positions page!")}
+          onSelectIndex={(m) => { setSelectedMarket(m); setCurrentScreen('optionChain'); }}
           marketParameters={marketParams}
-          onUpdateParameters={handleUpdateParams}
+          onOpenConfig={() => setShowConfigModal(true)}
         />
       )}
 
-      {/* 2. OPTION CHAIN */}
       {currentScreen === 'optionChain' && (
         <OptionChain
           onBack={() => setCurrentScreen('dashboard')}
           initialMarket={selectedMarket}
           marketParameters={marketParams}
-          onSelectOption={handleSelectOption}
+          onSelectOption={(data) => { setSelectedOption(data); setCurrentScreen('trade'); }}
         />
       )}
 
-      {/* 3. TRADE SCREEN */}
       {currentScreen === 'trade' && (
         <TradeScreen
           onBack={() => setCurrentScreen('optionChain')}
           optionData={selectedOption}
+          marketParameters={marketParams}
+          onOpenConfig={() => setShowConfigModal(true)}
         />
       )}
 
+      {/* Global Simulation Modal */}
+      {showConfigModal && (
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+           {/* Modal content from previous dashboard, just reused here.
+               (You can move the modal JSX into a separate 'SimulationModal.jsx' file for cleaner code) */}
+           <div className="bg-[#181c2a] w-full max-w-sm rounded-3xl p-5 shadow-2xl">
+             <div className="flex justify-between items-center mb-5"><h2 className="text-lg font-bold text-white">Parameters</h2><button onClick={() => setShowConfigModal(false)}><X className="text-white"/></button></div>
+             {/* Add your Config UI here */}
+           </div>
+        </div>
+      )}
     </div>
   );
 }
-
 export default App;
