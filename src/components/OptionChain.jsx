@@ -1,73 +1,42 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import useStore from '../store/useStore';
 
-export default function OptionChain({ onBack, initialMarket = 'NIFTY', marketParameters, onSelectOption, onOpenConfig }) {
+const PREV_CLOSES = { NIFTY: 24105.35, BANKNIFTY: 53057.80, FINNIFTY: 23754.80, SENSEX: 76765.84 };
+
+export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectOption, onOpenConfig }) {
   const [market, setMarket] = useState(initialMarket);
+  const marketTabRefs = useRef({});
+  const spotLevelRef = useRef(null);
 
-  // Helper to calculate upcoming expiries based on rules
-  const getUpcomingExpiries = (marketName) => {
-    const today = new Date('2026-07-30');
-    const expiries = [];
+  // Connect to Zustand Store
+  const spotLevels = useStore(state => state.settings.spotLevels);
+  const generatedExpiries = useStore(state => state.settings.generatedExpiries);
+  const selectedExpiries = useStore(state => state.settings.selectedExpiries);
 
-    let targetDay = 2; // Tuesday for Nifty, BankNifty, Finnifty
-    if (marketName === 'SENSEX') targetDay = 4; // Thursday for Sensex
+  const currentSpot = spotLevels[market] || 0;
 
-    let d = new Date(today);
-    let day = d.getDay();
-    let diff = (targetDay + 7 - day) % 7;
-    if (diff === 0) diff = 7;
-    d.setDate(d.getDate() + diff);
+  // Expiry Logic: Combine generated + manual expiry to ensure manual is always in the list
+  const availableExpiries = generatedExpiries[market] || [];
+  const manualExp = selectedExpiries[market];
 
-    // Generate next 5 expiries
-    for (let i = 0; i < 5; i++) {
-      const expDate = new Date(d);
-      if (marketName === 'BANKNIFTY' || marketName === 'FINNIFTY') {
-        // Last Tuesday of the month rule
-        const year = expDate.getFullYear();
-        const month = expDate.getMonth() + i;
-        const lastDay = new Date(year, month + 1, 0);
-        let lDay = lastDay.getDay();
-        let lDiff = (lDay - 2 + 7) % 7;
-        lastDay.setDate(lastDay.getDate() - lDiff);
-        expDate.setTime(lastDay.getTime());
-      } else {
-        expDate.setDate(d.getDate() + (i * 7));
-      }
+  // Creates a unique array that guarantees the manual expiry is at the front if it exists
+  const displayExpiries = Array.from(new Set([manualExp || availableExpiries[0], ...availableExpiries])).filter(Boolean);
 
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const formatted = `${String(expDate.getDate()).padStart(2, '0')} ${months[expDate.getMonth()]}`;
-      expiries.push(formatted);
-    }
-    return expiries;
-  };
+  const [localSelectedExpiry, setLocalSelectedExpiry] = useState(displayExpiries[0]);
 
-  const defaultParams = {
-    NIFTY: { price: 24358.15, change: 252.80, pct: 1.05 },
-    BANKNIFTY: { price: 52945.00, change: -112.80, pct: -0.21 },
-    FINNIFTY: { price: 23800.00, change: 45.20, pct: 0.18 },
-    SENSEX: { price: 77627.50, change: 861.66, pct: 1.12 }
-  };
-
-  const availableExpiries = getUpcomingExpiries(market);
-  const [selectedExpiry, setSelectedExpiry] = useState(availableExpiries[0]);
-
-  // Update expiry list when market changes
+  // Sync local active tab when global config or market changes
   useEffect(() => {
-    const newExps = getUpcomingExpiries(market);
-    setSelectedExpiry(newExps[0]);
-  }, [market]);
+    setLocalSelectedExpiry(selectedExpiries[market] || generatedExpiries[market]?.[0]);
+  }, [market, selectedExpiries, generatedExpiries]);
 
+  // Sync initial market from dashboard click and Auto-scroll
   useEffect(() => {
     setMarket(initialMarket);
+    if (marketTabRefs.current[initialMarket]) {
+      marketTabRefs.current[initialMarket].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
   }, [initialMarket]);
-
-  const marketData = {
-    ...defaultParams[market],
-    ...(marketParameters && marketParameters[market] ? marketParameters[market] : {})
-  };
-
-  const currentSpot = parseFloat(marketData.price);
-  const spotLevelRef = useRef(null);
 
   // Long press timer ref for opening simulator config
   const pressTimer = useRef(null);
@@ -99,6 +68,7 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', marketPar
     strikes.push({ strike, rawDistance });
   }
 
+  // Auto-scroll Option Chain to Center Line
   useEffect(() => {
     if (spotLevelRef.current) {
       spotLevelRef.current.scrollIntoView({ block: 'center', behavior: 'auto' });
@@ -106,19 +76,31 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', marketPar
   }, [market]);
 
   const handleOptionClick = (type, strikeData, distanceStr) => {
+    // Parse the premium safely
+    let premium = parseFloat(distanceStr);
+    if(isNaN(premium) || premium <= 0) premium = 1.05;
+
     if (onSelectOption) {
       onSelectOption({
         market: market,
-        expiry: selectedExpiry,
+        expiry: localSelectedExpiry,
         strike: strikeData.strike,
         type: type,
-        price: distanceStr,
+        price: premium,
         isItm: type === 'CE' ? strikeData.strike < currentSpot : strikeData.strike > currentSpot
       });
     }
   };
 
   const formatMoney = (val) => val.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  const formatDateLabel = (dateStr) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return dateStr;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${String(d.getDate()).padStart(2, '0')} ${months[d.getMonth()]}`;
+  };
 
   return (
     <>
@@ -133,36 +115,44 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', marketPar
         {/* FIXED STICKY TOP CONTAINER */}
         <div className="sticky top-0 z-30 bg-[#141824] shadow-md">
 
-          {/* Top Header - Scrollable Market Cards */}
+          {/* Top Header - Auto-scrolling Market Cards */}
           <div className="flex items-center pt-3 pb-3 pl-3 border-b border-[#252b3d] shrink-0">
             <button onClick={onBack} className="p-2 mr-1 text-[#828b9d] hover:text-white transition-colors">
               <ArrowLeft size={22} />
             </button>
 
             <div className="flex space-x-3 overflow-x-auto hide-scrollbar pr-4 pb-1">
-              {Object.keys(defaultParams).map(idx => {
-                const data = { ...defaultParams[idx], ...(marketParameters && marketParameters[idx] ? marketParameters[idx] : {}) };
+              {['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX'].map(idx => {
+                const val = spotLevels[idx] || 0;
+                const prev = PREV_CLOSES[idx];
+                const change = val - prev;
                 const isSelected = market === idx;
-                const isDown = data.change < 0;
+                const isDown = change < 0;
 
                 return (
                   <button
                     key={idx}
-                    onClick={() => setMarket(idx)}
+                    ref={(el) => (marketTabRefs.current[idx] = el)}
+                    onClick={() => {
+                      setMarket(idx);
+                      if (marketTabRefs.current[idx]) {
+                        marketTabRefs.current[idx].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                      }
+                    }}
                     className={"p-2.5 rounded-xl min-w-[175px] text-left transition-all border shrink-0 " + (isSelected ? "border-[#404c73] bg-[#1a2033]" : "border-transparent hover:bg-[#181c2a]")}
                   >
                     <div className="flex justify-between items-center mb-1.5">
                       <span className="text-[13px] font-bold text-[#e2e5eb] tracking-wide">{idx}</span>
                       <span className="text-[9px] bg-[#252b3d] text-[#828b9d] px-1.5 py-0.5 rounded font-semibold tracking-wider">
-                        Exp {availableExpiries[0]}
+                        Exp {formatDateLabel(selectedExpiries[idx] || generatedExpiries[idx]?.[0])}
                       </span>
                     </div>
                     <div className="flex items-center space-x-1.5 font-mono">
                       <span className={"text-[13px] font-bold " + (isDown ? "text-[#FF5C5C]" : "text-[#00D9B5]")}>
-                        {formatMoney(data.price)} {isDown ? "▼" : "▲"}
+                        {formatMoney(val)} {isDown ? "▼" : "▲"}
                       </span>
                       <span className={"text-[10px] font-semibold " + (isDown ? "text-[#FF5C5C]" : "text-[#00D9B5]")}>
-                        {isDown ? "" : "+"}{data.change}
+                        {isDown ? "" : "+"}{Math.abs(change).toFixed(2)}
                       </span>
                     </div>
                   </button>
@@ -171,7 +161,7 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', marketPar
             </div>
           </div>
 
-          {/* Expiry Bar (Auto-calculated options with long-press to config) */}
+          {/* Dynamic Interactive Expiry Bar */}
           <div
             onMouseDown={handleTouchStart}
             onMouseUp={handleTouchEnd}
@@ -180,15 +170,15 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', marketPar
             className="flex space-x-2 overflow-x-auto hide-scrollbar px-4 py-3 bg-[#141824] border-b border-[#252b3d] shrink-0 select-none"
             title="Long-press any expiry to open configuration"
           >
-            {availableExpiries.map(exp => {
-              const isSelected = selectedExpiry === exp;
+            {displayExpiries.map(exp => {
+              const isSelected = localSelectedExpiry === exp;
               return (
                 <button
                   key={exp}
-                  onClick={() => setSelectedExpiry(exp)}
+                  onClick={() => setLocalSelectedExpiry(exp)}
                   className={"px-4 py-1.5 rounded-full text-[11px] font-bold shrink-0 transition-colors " + (isSelected ? 'bg-[#00D9B5] text-[#0B0E11] shadow-md shadow-[#00D9B5]/20' : 'border border-[#252b3d] text-[#828b9d] hover:text-white')}
                 >
-                  {exp}
+                  {formatDateLabel(exp)}
                 </button>
               );
             })}
