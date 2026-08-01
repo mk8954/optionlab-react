@@ -5,11 +5,13 @@ import useStore from '../store/useStore';
 export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeExecute }) {
   // Connect to Zustand Database
   const executeTrade = useStore(state => state.executeTrade);
-  const lotSizes = useStore(state => state.settings.lotSizes);
   const availableCash = useStore(state => state.wallet.availableCash);
+  const lotSizes = useStore(state => state.settings.lotSizes);
 
   // Dynamic Data from Option Chain
   const { market, expiry, strike, type, price } = optionData;
+
+  // Dynamically pull lot size from the global store settings
   const lotSize = lotSizes[market] || 25;
 
   // Local State

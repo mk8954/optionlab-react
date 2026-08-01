@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import OptionChain from './components/OptionChain';
 import TradeScreen from './components/TradeScreen';
+import Positions from './components/Positions';
+import Analytics from './components/Analytics';
 import useStore from './store/useStore';
 import { X } from 'lucide-react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedMarket, setSelectedMarket] = useState('NIFTY');
-  const [activeTrade, setActiveTrade] = useState(null); // Added state for trade data
+  const [activeTrade, setActiveTrade] = useState(null);
 
   // Global Config Modal State
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -51,16 +53,31 @@ export default function App() {
   return (
     <div className="w-full h-screen bg-black relative">
 
-      {/* Route: Dashboard & Positions (Shared view for now) */}
-      {(currentView === 'dashboard' || currentView === 'positions') && (
+      {/* Route: Dashboard */}
+      {currentView === 'dashboard' && (
         <Dashboard
           onNavigateToTrade={() => setCurrentView('optionChain')}
           onNavigateToPositions={() => setCurrentView('positions')}
+          onNavigateToAnalytics={() => setCurrentView('analytics')}
           onSelectIndex={(market) => {
             setSelectedMarket(market);
             setCurrentView('optionChain');
           }}
           onOpenConfig={() => setShowConfigModal(true)}
+        />
+      )}
+
+      {/* Route: Positions Tab */}
+      {currentView === 'positions' && (
+        <Positions
+          onBack={() => setCurrentView('dashboard')}
+        />
+      )}
+
+      {/* Route: Analytics Tab */}
+      {currentView === 'analytics' && (
+        <Analytics
+          onBack={() => setCurrentView('dashboard')}
         />
       )}
 
@@ -83,7 +100,7 @@ export default function App() {
           optionData={activeTrade}
           onBack={() => setCurrentView('optionChain')}
           onOpenConfig={() => setShowConfigModal(true)}
-          onTradeExecute={() => setCurrentView('positions')} // Routes to positions tab after buy
+          onTradeExecute={() => setCurrentView('positions')}
         />
       )}
 

@@ -1,20 +1,19 @@
 import React, { useState } from 'react';
-import { Settings2, Home, Briefcase, ArrowLeftRight, BarChart2, MoreHorizontal, Lightbulb, ChevronRight, Eye, EyeOff, ArrowUp, ArrowDown } from 'lucide-react';
+import { Home, Briefcase, ArrowLeftRight, BarChart2, MoreHorizontal, ChevronRight, Eye, EyeOff, ArrowUp, ArrowDown } from 'lucide-react';
 import AppLogo from '../assets/logo.png';
 import useStore from '../store/useStore';
 
-// Pre-defined previous closes to calculate daily +/-
 const PREV_CLOSES = { NIFTY: 24105.35, BANKNIFTY: 53057.80, FINNIFTY: 23754.80, SENSEX: 76765.84 };
 
-export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, onSelectIndex, onOpenConfig }) {
+export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, onNavigateToAnalytics, onSelectIndex }) {
   const [hideBalance, setHideBalance] = useState(false);
 
   // Pull all required data from our central Zustand Store
-  const wallet = useStore(state => state.wallet);
-  const openPositions = useStore(state => state.openPositions);
-  const spotLevels = useStore(state => state.settings.spotLevels);
-  const selectedExpiries = useStore(state => state.settings.selectedExpiries);
-  const generatedExpiries = useStore(state => state.settings.generatedExpiries);
+  const wallet = useStore(state => state.wallet || { availableCash: 0, investedMargin: 0 });
+  const openPositions = useStore(state => state.openPositions || []);
+  const spotLevels = useStore(state => state.settings?.spotLevels || {});
+  const selectedExpiries = useStore(state => state.settings?.selectedExpiries || {});
+  const generatedExpiries = useStore(state => state.settings?.generatedExpiries || {});
 
   const formatExpiryDisplay = (dateString) => {
     if (!dateString) return 'Tue';
@@ -26,18 +25,16 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
 
   const formatMoney = (amount) => {
     if (hideBalance) return "••••••";
-    return "₹" + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return "₹" + (amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
-  // Derive active index data dynamically from the store
+  // Derive active index data dynamically
   const indices = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX'].map(name => {
     const currentVal = spotLevels[name] || 0;
     const prevClose = PREV_CLOSES[name];
     const pointChange = currentVal - prevClose;
     const pctChange = (pointChange / prevClose) * 100;
-
-    // Use manually selected expiry if available, otherwise fallback to the first generated one
-    const activeExp = selectedExpiries[name] || (generatedExpiries[name] && generatedExpiries[name][0]);
+    const activeExp = selectedExpiries[name] || (generatedExpiries[name] ? generatedExpiries[name][0] : '');
 
     return {
       name,
@@ -54,24 +51,21 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
 
   return (
     <>
-      <style>{"\n        .hide-scrollbar::-webkit-scrollbar { display: none; }\n        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }\n      "}</style>
+      <style>{`
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
 
       <div className="flex flex-col h-screen w-full sm:max-w-md sm:mx-auto bg-[#141824] text-[#E8EAED] font-sans relative overflow-hidden">
 
-        {/* Header */}
         <header className="px-5 py-4 flex items-center justify-between bg-[#141824] shrink-0 z-20">
-          <div>
-            <div className="flex items-center space-x-2">
-              <img src={AppLogo} alt="OL" className="w-7 h-7 rounded-lg shadow object-cover bg-[#181c2a]" onError={(e) => { e.target.style.display='none'; }} />
-              <h1 className="text-white font-bold text-xl tracking-wide">Option<span className="text-[#00D9B5]">Lab</span></h1>
-            </div>
+          <div className="flex items-center space-x-2">
+            <img src={AppLogo} alt="OL" className="w-7 h-7 rounded-lg shadow object-cover bg-[#181c2a]" onError={(e) => { e.target.style.display='none'; }} />
+            <div className="w-7 h-7 bg-[#00D9B5] rounded-lg hidden items-center justify-center font-black text-[#0B0E11] text-xs shadow">OL</div>
+            <h1 className="text-white font-bold text-xl tracking-wide">Option<span className="text-[#00D9B5]">Lab</span></h1>
           </div>
-          <button onClick={onOpenConfig} className="p-2 bg-[#181c2a] border border-[#252b3d] rounded-lg text-[#828b9d] hover:text-[#00D9B5] transition-colors focus:outline-none" title="Simulation Parameters">
-            <Settings2 className="w-5 h-5" />
-          </button>
         </header>
 
-        {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto pb-28 hide-scrollbar">
 
           <div className="px-4 pt-1 mb-6">
@@ -134,7 +128,7 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
                 <h3 className="text-[14px] font-bold text-gray-200">Open Positions</h3>
                 <span className="text-[11px] font-bold text-[#828b9d] bg-[#181c2a] border border-[#252b3d] px-2 py-0.5 rounded font-mono">{openPositions.length}</span>
               </div>
-              <button onClick={onNavigateToPositions} className="flex items-center text-xs font-bold text-[#00D9B5] hover:underline focus:outline-none">
+              <button onClick={onNavigateToPositions} className="flex items-center text-xs font-bold text-[#00D9B5] focus:outline-none hover:underline">
                 VIEW ALL <ChevronRight className="w-4 h-4 ml-0.5" />
               </button>
             </div>
@@ -144,16 +138,19 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
                   No open positions. Execute trades from the Option Chain.
                 </div>
               ) : (
-                openPositions.map(pos => {
+                // REVERSED ARRAY: Latest trades show up at the top
+                [...openPositions].reverse().map(pos => {
                   const isProfit = (pos.runningPnL || 0) >= 0;
                   return (
-                    <button key={pos.id} onClick={() => onNavigateToPositions()} className="w-full bg-[#181c2a] border border-[#252b3d] rounded-2xl p-4 flex justify-between items-center hover:bg-[#1d2232] text-left focus:outline-none">
+                    <button key={pos.id} onClick={onNavigateToPositions} className="w-full bg-[#181c2a] border border-[#252b3d] rounded-2xl p-4 flex justify-between items-center hover:bg-[#1d2232] text-left focus:outline-none shadow-sm">
                       <div>
                         <h4 className="text-[14px] font-bold text-white mb-1">{pos.symbol} {pos.strike} {pos.type}</h4>
-                        <p className="text-xs text-[#828b9d] font-semibold">Qty {pos.qty} <span className="mx-2">|</span> LTP {(pos.currentPremium || pos.entryPremium).toFixed(2)}</p>
+                        <p className="text-xs text-[#828b9d] font-semibold">Qty {pos.qty} <span className="mx-2 text-[#252b3d]">|</span> LTP {(pos.currentPremium || pos.entryPremium || 0).toFixed(2)}</p>
                       </div>
                       <div className="text-right">
-                        <div className={"text-[14px] font-bold mb-0.5 " + (isProfit ? "text-[#00D9B5]" : "text-[#FF5C5C]")}>{isProfit ? "+" : ""}₹{Math.abs(pos.runningPnL || 0).toLocaleString('en-IN')}</div>
+                        <div className={"text-[14px] font-bold mb-0.5 " + (isProfit ? "text-[#00D9B5]" : "text-[#FF5C5C]")}>
+                          {isProfit ? "+" : ""}₹{Math.abs(pos.runningPnL || 0).toLocaleString('en-IN')}
+                        </div>
                       </div>
                     </button>
                   );
@@ -162,26 +159,25 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
             </div>
           </div>
 
-          <div className="px-4 mb-4">
-            <h3 className="text-[14px] font-bold text-gray-200 mb-3">Today's Insight</h3>
-            <div className="bg-[#181c2a] border border-[#252b3d] rounded-2xl p-4 flex items-start space-x-3.5 shadow-sm">
-              <div className="bg-[#10141a] p-2.5 rounded-xl border border-[#252b3d] shrink-0">
-                <Lightbulb className="w-5 h-5 text-[#FFB020]" />
-              </div>
-              <p className="text-[12px] text-[#828b9d] leading-relaxed font-medium pt-0.5">
-                Your last 5 losing trades were entered after <span className="text-gray-300 font-bold">2:00 PM</span>. Try focusing on morning setups to improve your win rate.
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* FIXED BOTTOM TASKBAR */}
         <nav className="absolute bottom-0 left-0 right-0 w-full bg-[#141824] border-t border-[#252b3d] flex justify-around items-center h-[72px] pb-safe z-40">
-          <button className="flex flex-col items-center justify-center w-16 h-full text-[#00D9B5] focus:outline-none"><Home className="w-5 h-5 mb-1" /><span className="text-[10px] font-bold">Home</span></button>
-          <button onClick={onNavigateToPositions} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none"><Briefcase className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Positions</span></button>
-          <button onClick={onNavigateToTrade} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none"><ArrowLeftRight className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Trade</span></button>
-          <button className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none"><BarChart2 className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Analytics</span></button>
-          <button className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none"><MoreHorizontal className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">More</span></button>
+          <button className="flex flex-col items-center justify-center w-16 h-full text-[#00D9B5] focus:outline-none">
+            <Home className="w-5 h-5 mb-1" /><span className="text-[10px] font-bold">Home</span>
+          </button>
+          <button onClick={onNavigateToPositions} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none">
+            <Briefcase className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Positions</span>
+          </button>
+          <button onClick={onNavigateToTrade} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none">
+            <ArrowLeftRight className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Trade</span>
+          </button>
+          <button onClick={onNavigateToAnalytics} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none">
+            <BarChart2 className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Analytics</span>
+          </button>
+          <button className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none">
+            <MoreHorizontal className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">More</span>
+          </button>
         </nav>
 
       </div>

@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 import useStore from '../store/useStore';
 
 const PREV_CLOSES = { NIFTY: 24105.35, BANKNIFTY: 53057.80, FINNIFTY: 23754.80, SENSEX: 76765.84 };
 
-export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectOption, onOpenConfig }) {
+// Index specific rules
+const INDEXES = {
+  NIFTY:      { lotSize: 65, expiry: "Weekly & Monthly (Tuesday)" },
+  BANKNIFTY:  { lotSize: 30, expiry: "Monthly (Last Tuesday)" },
+  FINNIFTY:   { lotSize: 60, expiry: "Monthly (Last Tuesday)" },
+  SENSEX:     { lotSize: 20, expiry: "Weekly & Monthly (Thursday)" },
+};
+
+export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectOption }) {
   const [market, setMarket] = useState(initialMarket);
   const marketTabRefs = useRef({});
   const spotLevelRef = useRef(null);
@@ -13,21 +21,28 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
   const spotLevels = useStore(state => state.settings.spotLevels);
   const generatedExpiries = useStore(state => state.settings.generatedExpiries);
   const selectedExpiries = useStore(state => state.settings.selectedExpiries);
+  const setManualExpiry = useStore(state => state.setManualExpiry);
 
   const currentSpot = spotLevels[market] || 0;
 
-  // Expiry Logic: Combine generated + manual expiry to ensure manual is always in the list
-  const availableExpiries = generatedExpiries[market] || [];
-  const manualExp = selectedExpiries[market];
+  const [showExpiryModal, setShowExpiryModal] = useState(false);
+  const [tempDate, setTempDate] = useState("");
 
-  // Creates a unique array that guarantees the manual expiry is at the front if it exists
-  const displayExpiries = Array.from(new Set([manualExp || availableExpiries[0], ...availableExpiries])).filter(Boolean);
+  const baseExpiries = generatedExpiries[market] || [];
+  const customSelected = selectedExpiries[market];
 
-  const [localSelectedExpiry, setLocalSelectedExpiry] = useState(displayExpiries[0]);
+  const allExpiries = [...new Set([...baseExpiries, customSelected].filter(Boolean))];
 
-  // Sync local active tab when global config or market changes
+  // Sort real Date values chronologically
+  const sortedExpiries = allExpiries.sort((a, b) => new Date(a) - new Date(b));
+
+  // Keep track of the active selected pill
+  const activeGlobalExpiry = customSelected || sortedExpiries[0];
+  const [localSelectedExpiry, setLocalSelectedExpiry] = useState(activeGlobalExpiry);
+
+  // Sync active tab when global config or market changes
   useEffect(() => {
-    setLocalSelectedExpiry(selectedExpiries[market] || generatedExpiries[market]?.[0]);
+    setLocalSelectedExpiry(selectedExpiries[market] || sortedExpiries[0]);
   }, [market, selectedExpiries, generatedExpiries]);
 
   // Sync initial market from dashboard click and Auto-scroll
@@ -38,15 +53,21 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
     }
   }, [initialMarket]);
 
-  // Long press timer ref for opening simulator config
+  // Handle Long Press for Single-Index Expiry Modal
   const pressTimer = useRef(null);
   const handleTouchStart = () => {
-    pressTimer.current = setTimeout(() => {
-      if (onOpenConfig) onOpenConfig();
-    }, 800);
+    pressTimer.current = setTimeout(() => setShowExpiryModal(true), 600);
   };
   const handleTouchEnd = () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
+  const handleUpdateCustomExpiry = () => {
+    if (tempDate) {
+      setManualExpiry(market, tempDate);
+      setLocalSelectedExpiry(tempDate);
+    }
+    setShowExpiryModal(false);
   };
 
   // Swipe-to-go-back gesture
@@ -76,17 +97,13 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
   }, [market]);
 
   const handleOptionClick = (type, strikeData, distanceStr) => {
-    // Parse the premium safely
-    let premium = parseFloat(distanceStr);
-    if(isNaN(premium) || premium <= 0) premium = 1.05;
-
     if (onSelectOption) {
       onSelectOption({
         market: market,
         expiry: localSelectedExpiry,
         strike: strikeData.strike,
         type: type,
-        price: premium,
+        price: distanceStr,
         isItm: type === 'CE' ? strikeData.strike < currentSpot : strikeData.strike > currentSpot
       });
     }
@@ -94,17 +111,20 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
 
   const formatMoney = (val) => val.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
+  // Format ISO (YYYY-MM-DD) for display (DD MMM)
   const formatDateLabel = (dateStr) => {
     if (!dateStr) return '';
     const d = new Date(dateStr);
-    if (isNaN(d)) return dateStr;
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${String(d.getDate()).padStart(2, '0')} ${months[d.getMonth()]}`;
   };
 
   return (
     <>
-      <style>{"\n        .hide-scrollbar::-webkit-scrollbar { display: none; }\n        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }\n      "}</style>
+      <style>{`
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
 
       <div
         className="flex flex-col h-screen w-full sm:max-w-md sm:mx-auto bg-[#141824] text-[#E8EAED] font-sans relative"
@@ -139,7 +159,7 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
                         marketTabRefs.current[idx].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
                       }
                     }}
-                    className={"p-2.5 rounded-xl min-w-[175px] text-left transition-all border shrink-0 " + (isSelected ? "border-[#404c73] bg-[#1a2033]" : "border-transparent hover:bg-[#181c2a]")}
+                    className={"p-2.5 rounded-xl min-w-[175px] text-left transition-all border shrink-0 focus:outline-none " + (isSelected ? "border-[#404c73] bg-[#1a2033]" : "border-transparent hover:bg-[#181c2a]")}
                   >
                     <div className="flex justify-between items-center mb-1.5">
                       <span className="text-[13px] font-bold text-[#e2e5eb] tracking-wide">{idx}</span>
@@ -161,22 +181,22 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
             </div>
           </div>
 
-          {/* Dynamic Interactive Expiry Bar */}
+          {/* Dynamic Interactive Expiry Bar (Chronological) */}
           <div
-            onMouseDown={handleTouchStart}
-            onMouseUp={handleTouchEnd}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
             className="flex space-x-2 overflow-x-auto hide-scrollbar px-4 py-3 bg-[#141824] border-b border-[#252b3d] shrink-0 select-none"
             title="Long-press any expiry to open configuration"
           >
-            {displayExpiries.map(exp => {
+            {sortedExpiries.map(exp => {
               const isSelected = localSelectedExpiry === exp;
               return (
                 <button
                   key={exp}
+                  onMouseDown={handleTouchStart}
+                  onMouseUp={handleTouchEnd}
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
                   onClick={() => setLocalSelectedExpiry(exp)}
-                  className={"px-4 py-1.5 rounded-full text-[11px] font-bold shrink-0 transition-colors " + (isSelected ? 'bg-[#00D9B5] text-[#0B0E11] shadow-md shadow-[#00D9B5]/20' : 'border border-[#252b3d] text-[#828b9d] hover:text-white')}
+                  className={"px-4 py-1.5 rounded-full text-[11px] font-bold shrink-0 transition-colors focus:outline-none " + (isSelected ? 'bg-[#00D9B5] text-[#0B0E11] shadow-md shadow-[#00D9B5]/20' : 'border border-[#252b3d] text-[#828b9d] hover:text-white')}
                 >
                   {formatDateLabel(exp)}
                 </button>
@@ -253,6 +273,37 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
             );
           })}
         </div>
+
+        {/* SINGLE-INDEX EXPIRY MODAL */}
+        {showExpiryModal && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="bg-[#181c2a] border border-[#252b3d] p-5 rounded-lg w-full max-w-sm shadow-2xl">
+              <div className="flex justify-between items-start mb-1">
+                <h3 className="text-white font-bold text-base">Change Expiry</h3>
+                <X onClick={() => setShowExpiryModal(false)} className="w-5 h-5 text-[#828b9d] cursor-pointer" />
+              </div>
+
+              {/* Displaying Index Specific Rules */}
+              <p className="text-[#00D9B5] text-[11px] font-semibold mb-5 bg-[#00D9B5]/10 inline-block px-2 py-1 rounded">
+                {market} • {INDEXES[market]?.expiry || "Custom Expiry"}
+              </p>
+
+              <label className="text-[#828b9d] text-xs font-semibold block mb-2 tracking-wide uppercase">Select Custom Date</label>
+              <input
+                type="date"
+                className="w-full bg-[#0e121b] border border-[#252b3d] text-white p-3 rounded-lg mb-5 focus:outline-none focus:border-[#00D9B5] uppercase text-sm font-medium"
+                onChange={(e) => setTempDate(e.target.value)}
+              />
+
+              <button
+                onClick={handleUpdateCustomExpiry}
+                className="w-full py-3.5 bg-[#00D9B5] hover:bg-[#00c4a3] text-[#06110E] rounded-lg font-bold text-sm transition-colors uppercase tracking-wide focus:outline-none"
+              >
+                Update {market} Expiry
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     </>
