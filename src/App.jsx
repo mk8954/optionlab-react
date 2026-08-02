@@ -4,6 +4,7 @@ import OptionChain from './components/OptionChain';
 import TradeScreen from './components/TradeScreen';
 import Positions from './components/Positions';
 import Analytics from './components/Analytics';
+import More from './components/More';
 import useStore from './store/useStore';
 import { X } from 'lucide-react';
 
@@ -17,48 +18,68 @@ export default function App() {
   const [configMode, setConfigMode] = useState('values');
 
   // Connect to Zustand Store
-  const spotLevels = useStore((state) => state.settings.spotLevels);
-  const selectedExpiries = useStore((state) => state.settings.selectedExpiries);
-  const generatedExpiries = useStore((state) => state.settings.generatedExpiries);
+  const spotLevels = useStore((state) => state.settings?.spotLevels || {});
+  const selectedExpiries = useStore((state) => state.settings?.selectedExpiries || {});
+  const generatedExpiries = useStore((state) => state.settings?.generatedExpiries || {});
+  const customIndices = useStore((state) => state.settings?.customIndices || []);
   const updateSpotLevel = useStore((state) => state.updateSpotLevel);
   const setManualExpiry = useStore((state) => state.setManualExpiry);
+  const generateExpiries = useStore((state) => state.generateExpiries);
+
+  // Fire generation on mount to ensure database has dates ready
+  useEffect(() => {
+    generateExpiries();
+  }, [generateExpiries]);
+
+  // Safe Expiry Extractor to prevent crashes
+  const getSafeExpiry = (idxName) => {
+    if (selectedExpiries && selectedExpiries[idxName]) return selectedExpiries[idxName];
+    if (generatedExpiries && generatedExpiries[idxName] && Array.isArray(generatedExpiries[idxName])) {
+      return generatedExpiries[idxName][0];
+    }
+    return '';
+  };
 
   // Local state for modal form
   const [formValues, setFormValues] = useState(spotLevels);
-  const [formExpiries, setFormExpiries] = useState({
-    NIFTY: selectedExpiries.NIFTY || generatedExpiries.NIFTY[0],
-    BANKNIFTY: selectedExpiries.BANKNIFTY || generatedExpiries.BANKNIFTY[0],
-    FINNIFTY: selectedExpiries.FINNIFTY || generatedExpiries.FINNIFTY[0],
-    SENSEX: selectedExpiries.SENSEX || generatedExpiries.SENSEX[0],
-  });
+  const [formExpiries, setFormExpiries] = useState({});
 
   // Sync modal form whenever store changes or modal opens
   useEffect(() => {
     setFormValues(spotLevels);
-    setFormExpiries({
-      NIFTY: selectedExpiries.NIFTY || generatedExpiries.NIFTY[0],
-      BANKNIFTY: selectedExpiries.BANKNIFTY || generatedExpiries.BANKNIFTY[0],
-      FINNIFTY: selectedExpiries.FINNIFTY || generatedExpiries.FINNIFTY[0],
-      SENSEX: selectedExpiries.SENSEX || generatedExpiries.SENSEX[0],
-    });
-  }, [spotLevels, selectedExpiries, generatedExpiries, showConfigModal]);
+
+    const defaultExps = {
+      NIFTY: getSafeExpiry('NIFTY'),
+      BANKNIFTY: getSafeExpiry('BANKNIFTY'),
+      FINNIFTY: getSafeExpiry('FINNIFTY'),
+      SENSEX: getSafeExpiry('SENSEX'),
+      MIDCPNIFTY: getSafeExpiry('MIDCPNIFTY'),
+    };
+    if (customIndices && Array.isArray(customIndices)) {
+      customIndices.forEach(idx => {
+        defaultExps[idx.name] = getSafeExpiry(idx.name);
+      });
+    }
+    setFormExpiries(defaultExps);
+  }, [spotLevels, selectedExpiries, generatedExpiries, showConfigModal, customIndices]);
 
   const handleSaveModal = () => {
-    // Write changes permanently to Zustand Store (and localStorage)
     Object.keys(formValues).forEach(key => updateSpotLevel(key, parseFloat(formValues[key])));
     Object.keys(formExpiries).forEach(key => setManualExpiry(key, formExpiries[key]));
     setShowConfigModal(false);
   };
 
+  const allIndices = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX', 'MIDCPNIFTY', ...customIndices.map(i => i.name)];
+
   return (
     <div className="w-full h-screen bg-black relative">
 
-      {/* Route: Dashboard */}
       {currentView === 'dashboard' && (
         <Dashboard
           onNavigateToTrade={() => setCurrentView('optionChain')}
           onNavigateToPositions={() => setCurrentView('positions')}
           onNavigateToAnalytics={() => setCurrentView('analytics')}
+          onNavigateToMore={() => setCurrentView('more')}
           onSelectIndex={(market) => {
             setSelectedMarket(market);
             setCurrentView('optionChain');
@@ -67,21 +88,23 @@ export default function App() {
         />
       )}
 
-      {/* Route: Positions Tab */}
       {currentView === 'positions' && (
-        <Positions
-          onBack={() => setCurrentView('dashboard')}
-        />
+        <Positions onBack={() => setCurrentView('dashboard')} />
       )}
 
-      {/* Route: Analytics Tab */}
       {currentView === 'analytics' && (
-        <Analytics
-          onBack={() => setCurrentView('dashboard')}
+        <Analytics onBack={() => setCurrentView('dashboard')} />
+      )}
+
+      {currentView === 'more' && (
+        <More
+          onNavigateToHome={() => setCurrentView('dashboard')}
+          onNavigateToPositions={() => setCurrentView('positions')}
+          onNavigateToTrade={() => setCurrentView('optionChain')}
+          onNavigateToAnalytics={() => setCurrentView('analytics')}
         />
       )}
 
-      {/* Route: Option Chain */}
       {currentView === 'optionChain' && (
         <OptionChain
           initialMarket={selectedMarket}
@@ -94,7 +117,6 @@ export default function App() {
         />
       )}
 
-      {/* Route: Trade Screen */}
       {currentView === 'tradeSheet' && activeTrade && (
         <TradeScreen
           optionData={activeTrade}
@@ -104,11 +126,10 @@ export default function App() {
         />
       )}
 
-      {/* Global Config Modal (Rendered on top of everything) */}
+      {/* Global Config Modal */}
       {showConfigModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#181c2a] border border-[#252b3d] w-full max-w-sm rounded-3xl p-5 shadow-2xl relative animate-in fade-in duration-200">
-
             <div className="flex justify-between items-center mb-5 mt-1">
               <h2 className="text-lg font-bold text-white tracking-wide">Simulation Parameters</h2>
               <button onClick={() => setShowConfigModal(false)} className="p-1.5 rounded-xl bg-[#10141a] border border-[#252b3d] text-[#828b9d] hover:text-white transition-colors">
@@ -128,22 +149,22 @@ export default function App() {
               </button>
             </div>
 
-            <div className="space-y-3 mb-5">
-              {['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX'].map((idxName) => (
+            <div className="space-y-3 mb-5 max-h-[40vh] overflow-y-auto pr-1">
+              {allIndices.map((idxName) => (
                 <div key={idxName} className="bg-[#10141a] border border-[#252b3d] rounded-2xl p-3.5 flex items-center justify-between">
                   <div>
                     <div className="font-mono text-xs font-bold text-white tracking-wide">{idxName}</div>
-                    <div className="text-[10px] text-[#828b9d] font-mono mt-0.5">{idxName === 'SENSEX' ? 'BSE Index' : 'NSE Index'}</div>
+                    <div className="text-[10px] text-[#828b9d] font-mono mt-0.5">{idxName === 'SENSEX' ? 'BSE Index' : customIndices.find(c => c.name === idxName)?.type === 'Commodity' ? 'MCX / Commodity' : 'NSE Index'}</div>
                   </div>
-                  <div className="w-44">
+                  <div className="w-40">
                     {configMode === 'values' ? (
                       <input
-                        type="number" value={formValues[idxName]} onChange={(e) => setFormValues({...formValues, [idxName]: e.target.value})}
+                        type="number" value={formValues[idxName] || ''} onChange={(e) => setFormValues({...formValues, [idxName]: e.target.value})}
                         className="w-full bg-[#181c2a] border border-[#252b3d] rounded-xl px-3 py-2 text-white font-mono text-sm font-bold outline-none focus:border-[#00D9B5] text-right"
                       />
                     ) : (
                       <input
-                        type="date" value={formExpiries[idxName]} onChange={(e) => setFormExpiries({...formExpiries, [idxName]: e.target.value})}
+                        type="date" value={formExpiries[idxName] || ''} onChange={(e) => setFormExpiries({...formExpiries, [idxName]: e.target.value})}
                         className="w-full bg-[#181c2a] border border-[#252b3d] rounded-xl px-3 py-2 text-[#FFB020] font-mono text-xs font-bold outline-none focus:border-[#FFB020] cursor-pointer"
                       />
                     )}

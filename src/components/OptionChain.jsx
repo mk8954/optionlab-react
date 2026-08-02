@@ -6,10 +6,10 @@ const PREV_CLOSES = { NIFTY: 24105.35, BANKNIFTY: 53057.80, FINNIFTY: 23754.80, 
 
 // Index specific rules
 const INDEXES = {
-  NIFTY:      { lotSize: 65, expiry: "Weekly & Monthly (Tuesday)" },
-  BANKNIFTY:  { lotSize: 30, expiry: "Monthly (Last Tuesday)" },
+  NIFTY:      { lotSize: 65, expiry: "Weekly & Monthly (Thursday)" },
+  BANKNIFTY:  { lotSize: 30, expiry: "Monthly (Last Wednesday)" },
   FINNIFTY:   { lotSize: 60, expiry: "Monthly (Last Tuesday)" },
-  SENSEX:     { lotSize: 20, expiry: "Weekly & Monthly (Thursday)" },
+  SENSEX:     { lotSize: 20, expiry: "Weekly & Monthly (Friday)" },
 };
 
 export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectOption }) {

@@ -5,12 +5,14 @@ import useStore from '../store/useStore';
 
 const PREV_CLOSES = { NIFTY: 24105.35, BANKNIFTY: 53057.80, FINNIFTY: 23754.80, SENSEX: 76765.84 };
 
-export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, onNavigateToAnalytics, onSelectIndex }) {
+export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, onNavigateToAnalytics, onSelectIndex, onNavigateToMore }) {
   const [hideBalance, setHideBalance] = useState(false);
 
   // Pull all required data from our central Zustand Store
   const wallet = useStore(state => state.wallet || { availableCash: 0, investedMargin: 0 });
   const openPositions = useStore(state => state.openPositions || []);
+  const trades = useStore(state => state.trades || []);
+  const statement = useStore(state => state.statement || []);
   const spotLevels = useStore(state => state.settings?.spotLevels || {});
   const selectedExpiries = useStore(state => state.settings?.selectedExpiries || {});
   const generatedExpiries = useStore(state => state.settings?.generatedExpiries || {});
@@ -46,8 +48,19 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
     };
   });
 
-  const totalPnL = openPositions.reduce((acc, p) => acc + (p.runningPnL || 0), 0);
-  const totalPnLPct = wallet.investedMargin > 0 ? (totalPnL / wallet.investedMargin) * 100 : 0;
+  // --- LIVE P&L CALCULATIONS ---
+  // Overall Gain Calculation
+  const overallNet = trades.reduce((acc, t) => acc + (t.netPnL || 0), 0);
+  const totalDeposits = statement.filter(s => s.type === 'deposit').reduce((acc, s) => acc + s.amount, 0);
+  const overallPct = totalDeposits > 0 ? (overallNet / totalDeposits) * 100 : 0;
+  const isOverallProfit = overallNet >= 0;
+
+  // Today's Gain Calculation (Realized + Unrealized)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayRealizedPnL = trades.filter(t => t.date === todayStr).reduce((acc, t) => acc + (t.netPnL || 0), 0);
+  const unrealizedPnL = openPositions.reduce((acc, p) => acc + (p.runningPnL || 0), 0);
+  const todayTotalPnL = todayRealizedPnL + unrealizedPnL;
+  const todayPnLPct = wallet.investedMargin > 0 ? (todayTotalPnL / wallet.investedMargin) * 100 : 0;
 
   return (
     <>
@@ -68,6 +81,7 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
 
         <div className="flex-1 overflow-y-auto pb-28 hide-scrollbar">
 
+          {/* WALLET HERO CARD */}
           <div className="px-4 pt-1 mb-6">
             <div className="bg-gradient-to-br from-[#1b202e] to-[#151925] border border-[#252b3d] rounded-2xl p-5 shadow-lg relative overflow-hidden">
               <div className="mb-1">
@@ -79,21 +93,24 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
                   </button>
                 </div>
               </div>
-              <div className="flex items-center text-[#00D9B5] text-[13px] font-semibold mb-6">
-                <ArrowUp className="w-3.5 h-3.5 mr-1" />
-                Overall Gain +₹45,320 (+5.56%)
+
+              <div className={`flex items-center text-[13px] font-semibold mb-6 ${isOverallProfit ? 'text-[#00D9B5]' : 'text-[#FF5C5C]'}`}>
+                {isOverallProfit ? <ArrowUp className="w-3.5 h-3.5 mr-1" /> : <ArrowDown className="w-3.5 h-3.5 mr-1" />}
+                Overall Gain {isOverallProfit ? '+' : '−'}₹{Math.abs(overallNet).toLocaleString('en-IN', {minimumFractionDigits: 0})}
+                <span className="ml-1">({isOverallProfit ? '+' : ''}{overallPct.toFixed(2)}%)</span>
               </div>
+
               <div className="flex justify-between items-end pt-3 border-t border-[#31384e]">
                 <div>
-                  <p className="text-[#828b9d] text-[11px] font-semibold tracking-wide mb-1">Invested Value</p>
+                  <p className="text-[#828b9d] text-[11px] font-semibold tracking-wide mb-1">Invested Margin</p>
                   <p className="text-white font-bold text-[15px]">{formatMoney(wallet.investedMargin)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[#828b9d] text-[11px] font-semibold tracking-wide mb-1 flex items-center justify-end">
-                    {totalPnL >= 0 ? <ArrowUp className="w-3 h-3 mr-1 text-[#00D9B5]" /> : <ArrowDown className="w-3 h-3 mr-1 text-[#FF5C5C]" />} Today's P&L
+                    {todayTotalPnL >= 0 ? <ArrowUp className="w-3 h-3 mr-1 text-[#00D9B5]" /> : <ArrowDown className="w-3 h-3 mr-1 text-[#FF5C5C]" />} Today's P&L
                   </p>
-                  <p className={`font-bold text-[15px] ${totalPnL >= 0 ? 'text-[#00D9B5]' : 'text-[#FF5C5C]'}`}>
-                    {totalPnL >= 0 ? '+' : ''}₹{Math.abs(totalPnL).toLocaleString('en-IN')} <span className="font-semibold text-xs ml-0.5">({totalPnLPct >= 0 ? '+' : ''}{totalPnLPct.toFixed(2)}%)</span>
+                  <p className={`font-bold text-[15px] ${todayTotalPnL >= 0 ? 'text-[#00D9B5]' : 'text-[#FF5C5C]'}`}>
+                    {todayTotalPnL >= 0 ? '+' : '−'}₹{Math.abs(todayTotalPnL).toLocaleString('en-IN')} <span className="font-semibold text-xs ml-0.5">({todayPnLPct >= 0 ? '+' : ''}{todayPnLPct.toFixed(2)}%)</span>
                   </p>
                 </div>
               </div>
@@ -138,7 +155,6 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
                   No open positions. Execute trades from the Option Chain.
                 </div>
               ) : (
-                // REVERSED ARRAY: Latest trades show up at the top
                 [...openPositions].reverse().map(pos => {
                   const isProfit = (pos.runningPnL || 0) >= 0;
                   return (
@@ -149,7 +165,7 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
                       </div>
                       <div className="text-right">
                         <div className={"text-[14px] font-bold mb-0.5 " + (isProfit ? "text-[#00D9B5]" : "text-[#FF5C5C]")}>
-                          {isProfit ? "+" : ""}₹{Math.abs(pos.runningPnL || 0).toLocaleString('en-IN')}
+                          {isProfit ? "+" : "−"}₹{Math.abs(pos.runningPnL || 0).toLocaleString('en-IN')}
                         </div>
                       </div>
                     </button>
@@ -175,7 +191,7 @@ export default function Dashboard({ onNavigateToTrade, onNavigateToPositions, on
           <button onClick={onNavigateToAnalytics} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none">
             <BarChart2 className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Analytics</span>
           </button>
-          <button className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none">
+          <button onClick={onNavigateToMore} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors focus:outline-none">
             <MoreHorizontal className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">More</span>
           </button>
         </nav>

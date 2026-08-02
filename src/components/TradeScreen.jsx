@@ -119,6 +119,8 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
       entryReason: selectedReasons.join(', '),
       slPercent,
       targetPercent,
+      slPrice: parseFloat(slPrice), // NEW: Save exact SL price
+      targetPrice: parseFloat(targetPrice), // NEW: Save exact Target price
       entryTime: new Date().toISOString()
     });
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, X } from 'lucide-react';
 import useStore from '../store/useStore';
 
 // Helper to calculate time difference
@@ -16,18 +16,17 @@ const getHeldTime = (start, end) => {
   return `${m}m`;
 };
 
-// Helper to exactly calculate charges for Break Even
-const calcCharges = (buyPrice, sellPrice, q, isRoundTrip = true) => {
-  const buyTO = buyPrice * q;
-  const sellTO = isRoundTrip ? (sellPrice * q) : 0;
-  const totalTO = buyTO + sellTO;
-  const bro = isRoundTrip ? 40.00 : 20.00;
-  const stt = Math.round((sellTO * 0.0015) * 100) / 100;
-  const txn = Math.round((totalTO * 0.0003503) * 100) / 100;
-  const sebi = Math.round((totalTO * 0.000001) * 100) / 100;
-  const stamp = Math.round((buyTO * 0.00003) * 100) / 100;
-  const gst = Math.round(((bro + txn + sebi) * 0.18) * 100) / 100;
-  return bro + stt + txn + sebi + stamp + gst;
+// Exact Charges Calculator (Matching Trade Screen)
+const calculateExactCharges = (premium, qty, isBuy) => {
+  const turnover = premium * qty;
+  const brokerage = 20;
+  const stt = isBuy ? 0 : turnover * 0.00125; // STT only on sell for options
+  const txn = turnover * 0.000495; // NSE Options txn charge
+  const gst = (brokerage + txn) * 0.18;
+  const sebi = turnover * 0.000001;
+  const stamp = isBuy ? turnover * 0.00003 : 0; // Stamp duty only on buy
+
+  return brokerage + stt + txn + gst + sebi + stamp;
 };
 
 export default function Positions({ onBack }) {
@@ -36,17 +35,14 @@ export default function Positions({ onBack }) {
   const [expandedTradeId, setExpandedTradeId] = useState(null);
   const [ltpInputs, setLtpInputs] = useState({});
   const [now, setNow] = useState(Date.now());
-  const [showCustomReason, setShowCustomReason] = useState(false);
-  const [customReasonText, setCustomReasonText] = useState("");
 
-  // Swipe-to-go-back gesture
-  const [touchStartPos, setTouchStartPos] = useState(null);
-  const handleGestureStart = (e) => setTouchStartPos(e.targetTouches[0].clientX);
-  const handleGestureEnd = (e) => {
-    if (!touchStartPos) return;
-    const distance = touchStartPos - e.changedTouches[0].clientX;
-    if (distance < -75) onBack();
-  };
+  // Custom Reason State
+  const [showCustomReason, setShowCustomReason] = useState(false);
+  const [customReasonText, setCustomReasonText] = useState('');
+
+  // Post-Trade Reflection State
+  const [postTradeModalId, setPostTradeModalId] = useState(null);
+  const [tradeLessonText, setTradeLessonText] = useState('');
 
   // Force re-render every minute to update the "Held" time dynamically
   useEffect(() => {
@@ -58,9 +54,9 @@ export default function Positions({ onBack }) {
   const openPositions = useStore(state => state.openPositions || []);
   const trades = useStore(state => state.trades || []);
   const wallet = useStore(state => state.wallet || { investedMargin: 0, availableCash: 0 });
-  const lotSizes = useStore(state => state.settings?.lotSizes || { NIFTY: 65, BANKNIFTY: 30, FINNIFTY: 60, SENSEX: 20 });
   const updatePositionLTP = useStore(state => state.updatePositionLTP);
   const closePosition = useStore(state => state.closePosition);
+  const addTradeLesson = useStore(state => state.addTradeLesson);
 
   // Derived Stats safely
   const totalUnrealizedPnL = openPositions.reduce((acc, p) => acc + (p.runningPnL || 0), 0);
@@ -80,13 +76,42 @@ export default function Positions({ onBack }) {
     }
   };
 
-  const handleExitTrade = (reason) => {
+  const handleExitTrade = (reason, explicitPrice = null) => {
     if (exitModalPos) {
-      closePosition(exitModalPos.id, exitModalPos.currentPremium || 0, reason);
+      // Determine the precise exit price based on the reason clicked
+      let exitPrice = exitModalPos.currentPremium || exitModalPos.entryPremium;
+
+      const slPrice = parseFloat(exitModalPos.slPrice || exitModalPos.stopLoss);
+      const tgtPrice = parseFloat(exitModalPos.targetPrice || exitModalPos.target);
+
+      if (reason === 'Stop Loss Hit' && !isNaN(slPrice)) {
+        exitPrice = slPrice;
+      } else if (reason === 'Target Hit' && !isNaN(tgtPrice)) {
+        exitPrice = tgtPrice;
+      } else if (explicitPrice !== null && !isNaN(explicitPrice)) {
+        exitPrice = explicitPrice;
+      }
+
+      closePosition(exitModalPos.id, exitPrice, reason);
+
+      // If we didn't hit our target, trigger the reflection journal popup
+      if (reason !== 'Target Hit') {
+        setPostTradeModalId(exitModalPos.id);
+      }
+
+      // Reset Modal states
       setExitModalPos(null);
       setShowCustomReason(false);
-      setCustomReasonText("");
+      setCustomReasonText('');
     }
+  };
+
+  const handleSaveLesson = () => {
+    if (postTradeModalId && tradeLessonText.trim()) {
+      addTradeLesson(postTradeModalId, tradeLessonText.trim());
+    }
+    setPostTradeModalId(null);
+    setTradeLessonText('');
   };
 
   const formatDate = (dateStr) => {
@@ -97,27 +122,29 @@ export default function Positions({ onBack }) {
     return `${String(d.getDate()).padStart(2, '0')} ${months[d.getMonth()]} ${d.getFullYear()}`;
   };
 
+  // Swipe-to-go-back gesture
+  const [touchStartPos, setTouchStartPos] = useState(null);
+  const handleGestureStart = (e) => setTouchStartPos(e.targetTouches[0].clientX);
+  const handleGestureEnd = (e) => {
+    if (!touchStartPos) return;
+    const distance = e.changedTouches[0].clientX - touchStartPos;
+    if (distance > 75) onBack(); // Swipe right to go back
+  };
+
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
 
-        .pos-wrapper {
-          background: #14161f;
-          font-family: 'Inter', sans-serif;
-          min-height: 100vh;
-          display: flex;
-          flex-direction: column;
-        }
-
+        .pos-wrapper { background: #14161f; font-family: 'Inter', sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
         .header { padding: 20px 22px 14px 22px; display: flex; flex-direction: column; }
-        .header-top { display: flex; items-center; gap: 12px; margin-bottom: 4px; }
+        .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
         .title { color: #e8e9ee; font-size: 19px; font-weight: 700; }
-        .title-sub { color: #6e7284; font-size: 11.5px; margin-top: 2px; padding-left: 36px;}
+        .title-sub { color: #6e7284; font-size: 11.5px; margin-top: 2px; padding-left: 32px;}
 
         .tabs { display: flex; gap: 6px; margin-top: 14px; background: rgba(255,255,255,0.03); padding: 4px; border-radius: 10px; }
         .tab { flex: 1; text-align: center; padding: 8px 0; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: #6e7284; cursor: pointer; transition: all 0.2s;}
@@ -136,7 +163,7 @@ export default function Positions({ onBack }) {
         .pos-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; margin-left: 6px; vertical-align: middle; }
         .badge-ce { background: rgba(61,220,151,0.16); color: #3ddc97; }
         .badge-pe { background: rgba(255,107,107,0.16); color: #ff6b6b; }
-        .pos-expiry { color: #6b7390; font-size: 11px; margin-top: 3px; }
+        .pos-expiry { color: #6b7390; font-size: 11px; margin-top: 3px; font-weight: 500;}
         .pos-pl { text-align: right; }
         .pos-pl .amt { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; }
         .pos-pl .amt.pos { color: #3ddc97; }
@@ -144,9 +171,14 @@ export default function Positions({ onBack }) {
         .pos-pl .pct { font-size: 10.5px; color: #6fce9e; font-weight: 600; }
         .pos-pl .pct.neg { color: #ff9c9c; }
 
+        .row-right .amt { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; }
+        .row-right .amt.pos { color: #3ddc97; }
+        .row-right .amt.neg { color: #ff6b6b; }
+
         .progress-wrap { margin-top: 14px; }
         .progress-labels { display: flex; justify-content: space-between; font-size: 10px; color: #6b7390; margin-bottom: 5px; font-weight: 600;}
         .progress-labels .sl { color: #ff6b6b; }
+        .progress-labels .be { color: #cfd2dc; font-family: 'JetBrains Mono', monospace; font-size: 9px; }
         .progress-labels .tgt { color: #3ddc97; }
         .progress-track { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.06); position: relative; }
         .progress-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #ff6b6b, #3ddc97); width: 100%; }
@@ -169,24 +201,31 @@ export default function Positions({ onBack }) {
         .update-btn { flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); color: #cfd2dc; font-size: 12px; font-weight: 600; padding: 8px 0; border-radius: 8px; cursor: pointer; transition: background 0.2s;}
         .update-btn:active { background: rgba(255,255,255,0.1); }
 
-        .exit-btn { width: 100%; margin-top: 10px; background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.25); color: #ff6b6b; font-size: 12.5px; font-weight: 700; padding: 10px 0; border-radius: 8px; cursor: pointer; letter-spacing: 0.3px; transition: background 0.2s;}
+        .exit-btn { width: 100%; margin-top: 10px; background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.25); color: #ff6b6b; font-size: 12.5px; font-weight: 700; padding: 10px 0; border-radius: 8px; cursor: pointer; letter-spacing: 0.3px; transition: background 0.2s; text-transform: uppercase;}
         .exit-btn:active { background: rgba(255,107,107,0.18); }
 
         /* Exit reason modal */
-        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
-        .sheet { width: 100%; max-width: 448px; background: #181a24; border-radius: 18px 18px 0 0; padding: 20px 22px 26px 22px; border: 1px solid rgba(255,255,255,0.06); border-bottom: none; animation: slideUp 0.3s ease-out forwards;}
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+        .sheet { width: 100%; max-width: 448px; background: #181a24; border-radius: 18px 18px 0 0; padding: 20px 22px 26px 22px; border: 1px solid rgba(255,255,255,0.06); border-bottom: none; animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;}
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .sheet-title { color: #d5d7e0; font-size: 15px; font-weight: 700; margin-bottom: 3px; }
         .sheet-sub { color: #6e7284; font-size: 11.5px; margin-bottom: 16px; font-weight: 500;}
-        .reason-btn { width: 100%; text-align: left; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); color: #cfd2dc; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 600; margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .reason-btn { width: 100%; text-align: left; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); color: #cfd2dc; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 600; margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }
         .reason-btn:active { background: rgba(255,255,255,0.08); }
+        .reason-btn:hover { background: rgba(255,255,255,0.06); }
         .reason-btn .arrow { color: #5c6072; font-size: 16px;}
         .cancel-btn { width: 100%; background: none; border: none; color: #6e7284; padding: 10px 0; font-size: 13px; font-weight: 600; margin-top: 6px; cursor: pointer; }
 
-        .reason-input { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px 14px; color: #d5d7e0; font-size: 13.5px; outline: none; margin-bottom: 10px; font-family: 'Inter', sans-serif;}
-        .reason-input:focus { border-color: rgba(61,220,151,0.4); }
-        .confirm-btn { width: 100%; background: rgba(61,220,151,0.1); border: 1px solid rgba(61,220,151,0.25); color: #3ddc97; font-size: 13.5px; font-weight: 700; padding: 12px 0; border-radius: 8px; cursor: pointer; letter-spacing: 0.3px; transition: background 0.2s;}
-        .confirm-btn:active { background: rgba(61,220,151,0.18); }
+        /* Custom Reason Input */
+        .custom-reason-input { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(61,220,151,0.4); border-radius: 10px; padding: 12px 14px; color: #fff; font-size: 13.5px; outline: none; margin-bottom: 8px;}
+        .custom-reason-input::placeholder { color: #5c6072; }
+        .submit-reason-btn { width: 100%; background: #3ddc97; color: #0a0b12; border: none; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 700; margin-bottom: 8px; cursor: pointer;}
+
+        /* Lesson Textarea */
+        .lesson-textarea { width: 100%; height: 100px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,107,107,0.4); border-radius: 10px; padding: 12px 14px; color: #fff; font-size: 13.5px; outline: none; margin-bottom: 12px; resize: none; font-family: 'Inter', sans-serif;}
+        .lesson-textarea::placeholder { color: #5c6072; }
+        .submit-lesson-btn { width: 100%; background: #ff6b6b; color: #fff; border: none; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 700; margin-bottom: 8px; cursor: pointer; transition: opacity 0.2s;}
+        .submit-lesson-btn:active { opacity: 0.8; }
 
         /* Closed (today) list */
         .stats-strip { display: flex; justify-content: space-between; padding: 14px 22px; margin: 14px 22px 0 22px; background: rgba(255,255,255,0.03); border-radius: 12px; }
@@ -201,9 +240,6 @@ export default function Positions({ onBack }) {
         .row-main { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; }
         .name-row { display: flex; align-items: center; }
         .row-right { display: flex; align-items: center; gap: 8px; }
-        .row-right .amt { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; }
-        .row-right .amt.pos { color: #3ddc97; }
-        .row-right .amt.neg { color: #ff6b6b; }
         .sub-row { color: #5c6072; font-size: 10px; margin-top: 3px; font-weight: 500;}
         .chev { color: #5c6072; font-size: 15px; font-weight: 600; transition: transform 0.2s ease; }
         .closed-row.open .chev { transform: rotate(90deg); }
@@ -211,12 +247,14 @@ export default function Positions({ onBack }) {
         .detail { max-height: 0; overflow: hidden; transition: max-height 0.25s ease; }
         .closed-row.open .detail { max-height: 250px; }
         .detail-inner { padding: 2px 0 14px 0; }
-        .detail-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px 6px; background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 10px 0; }
+        .detail-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 6px; background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px 10px 0 0; border-bottom: none; padding: 10px 0; }
+        .detail-grid-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 6px; background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.05); border-radius: 0 0 10px 10px; padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.05);}
         .d-item { text-align: center; position: relative; }
         .d-item:not(:last-child)::after { content: ""; position: absolute; right: 0; top: 2px; bottom: 2px; width: 1px; background: rgba(255,255,255,0.06); }
         .d-item .l { color: #5c6072; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
         .d-item .v { color: #cfd2dc; font-size: 12px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
         .d-item .v.pos { color: #3ddc97; } .d-item .v.neg { color: #ff6b6b; }
+        .d-item .v.charges { color: #ffb74d; }
 
         .reason-row { display: flex; gap: 8px; margin-top: 10px; }
         .reason-box { flex: 1; text-align: center; padding: 8px 4px; border-radius: 8px; background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.05); }
@@ -282,26 +320,31 @@ export default function Positions({ onBack }) {
                     const plPct = (runningPnL / marginUsed) * 100;
 
                     const entryPremium = pos.entryPremium || 0;
-                    const currentPremium = pos.currentPremium || 0;
+                    const currentPremium = pos.currentPremium || entryPremium;
 
-                    const sl = parseFloat(pos.slPrice) || entryPremium * 0.9;
-                    const tgt = parseFloat(pos.targetPrice) || entryPremium * 1.2;
+                    // Strictly parse the EXACT SL and Target saved from TradeScreen
+                    let sl = parseFloat(pos.slPrice || pos.stopLoss);
+                    if (isNaN(sl)) sl = entryPremium * 0.9; // Ultimate fallback if broken data
+
+                    let tgt = parseFloat(pos.targetPrice || pos.target);
+                    if (isNaN(tgt)) tgt = entryPremium * 1.2;
+
+                    // Calculate Break-Even accurately
+                    const buyCharges = calculateExactCharges(entryPremium, pos.qty, true);
+                    const sellCharges = calculateExactCharges(entryPremium, pos.qty, false); // Approximating sell charges at same price
+                    const totalEstCharges = buyCharges + sellCharges;
+                    const pointsNeededForBE = totalEstCharges / (pos.qty || 1);
+                    const breakEvenPrice = entryPremium + pointsNeededForBE;
+
                     let progress = ((currentPremium - sl) / (tgt - sl)) * 100;
                     progress = Math.max(0, Math.min(100, progress || 0));
-
-                    // Exact break-even based on entry + calculated charges / qty
-                    const beCharges = calcCharges(entryPremium, entryPremium, pos.qty || 1, true);
-                    const breakEven = entryPremium + (beCharges / (pos.qty || 1));
 
                     // Safely extract month from expiry
                     let expiryDisplay = pos.expiry;
                     if(pos.expiry && pos.expiry.includes('-')) {
                        const parts = pos.expiry.split('-');
-                       expiryDisplay = `${parts[0]} ${parts[1]}`;
+                       expiryDisplay = `${parts[0]} ${parts[1]}`; // Approx DD MMM
                     }
-
-                    const lotSize = lotSizes[pos.symbol] || 1;
-                    const lots = pos.qty / lotSize;
 
                     return (
                       <div key={pos.id} className="pos-card">
@@ -310,7 +353,7 @@ export default function Positions({ onBack }) {
                           <div>
                             <span className="pos-name">{pos.symbol || 'OPT'} {pos.strike || 0}</span>
                             <span className={`pos-badge ${pos.type === 'CE' ? 'badge-ce' : 'badge-pe'}`}>{pos.type || 'OPT'}</span>
-                            <div className="pos-expiry">Expiry {expiryDisplay} · {lots} {lots > 1 ? 'lots' : 'lot'}</div>
+                            <div className="pos-expiry">Expiry {expiryDisplay} · {pos.qty / (pos.lotSize || 1)} {pos.qty / (pos.lotSize || 1) > 1 ? 'lots' : 'lot'}</div>
                           </div>
                           <div className="pos-pl">
                             <div className={`amt ${isProfit ? 'pos' : 'neg'}`}>
@@ -325,7 +368,7 @@ export default function Positions({ onBack }) {
                         <div className="progress-wrap">
                           <div className="progress-labels">
                             <span className="sl">SL {sl.toFixed(1)}</span>
-                            <span>BE {breakEven.toFixed(1)}</span>
+                            <span className="be">BE {breakEvenPrice.toFixed(1)}</span>
                             <span className="tgt">Target {tgt.toFixed(1)}</span>
                           </div>
                           <div className="progress-track">
@@ -353,7 +396,7 @@ export default function Positions({ onBack }) {
                             value={ltpInputs[pos.id] || ''}
                             onChange={(e) => setLtpInputs({...ltpInputs, [pos.id]: e.target.value})}
                           />
-                          <button className="update-btn" onClick={() => handleUpdateLTP(pos.id)}>Update</button>
+                          <button className="update-btn" onClick={() => handleUpdateLTP(pos.id)}>Update LTP</button>
                         </div>
 
                         <button className="exit-btn" onClick={() => setExitModalPos(pos)}>EXIT POSITION</button>
@@ -388,16 +431,20 @@ export default function Positions({ onBack }) {
                     const isProfit = (trade.netPnL || 0) >= 0;
                     const entryPremium = trade.entryPremium || 0;
                     const exitPremium = trade.exitPremium || 0;
-                    const chargesBreakdown = trade.chargesBreakdown || 0;
+
+                    // safely extract total charges
+                    let totalCharges = 0;
+                    if (typeof trade.chargesBreakdown === 'object') {
+                      totalCharges = trade.chargesBreakdown.total || 0;
+                    } else {
+                      totalCharges = trade.chargesBreakdown || 0;
+                    }
 
                     let closeTime = '--:--';
                     if (trade.exitTime) {
                       const d = new Date(trade.exitTime);
                       if (!isNaN(d)) closeTime = d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     }
-
-                    const lotSize = lotSizes[trade.index] || 1;
-                    const lots = trade.qty / lotSize;
 
                     return (
                       <div key={trade.tradeId} className={`closed-row ${isOpen ? 'open' : ''}`}>
@@ -407,7 +454,7 @@ export default function Positions({ onBack }) {
                               <span className="pos-name">{trade.index || 'OPT'} {trade.strike || 0}</span>
                               <span className={`pos-badge ${trade.type === 'CE' ? 'badge-ce' : 'badge-pe'}`}>{trade.type || 'OPT'}</span>
                             </div>
-                            <div className="sub-row">Closed {closeTime} · {lots} {lots > 1 ? 'lots' : 'lot'}</div>
+                            <div className="sub-row">Closed {closeTime}</div>
                           </div>
                           <div className="row-right">
                             <div className={`amt ${isProfit ? 'pos' : 'neg'}`}>
@@ -419,13 +466,13 @@ export default function Positions({ onBack }) {
 
                         <div className="detail">
                           <div className="detail-inner">
-                            <div className="detail-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottom: 'none' }}>
+                            <div className="detail-grid">
                               <div className="d-item"><div className="l">Buy</div><div className="v">{entryPremium.toFixed(2)}</div></div>
                               <div className="d-item"><div className="l">Sell</div><div className="v">{exitPremium.toFixed(2)}</div></div>
                               <div className="d-item"><div className="l">Held</div><div className="v">{getHeldTime(trade.entryTime, trade.exitTime)}</div></div>
                             </div>
-                            <div className="detail-grid" style={{ gridTemplateColumns: '1fr 1fr', borderTopLeftRadius: 0, borderTopRightRadius: 0, marginTop: 0, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                              <div className="d-item"><div className="l">Charges</div><div className="v" style={{color: '#ff6b6b'}}>₹{chargesBreakdown.toFixed(2)}</div></div>
+                            <div className="detail-grid-bottom">
+                              <div className="d-item"><div className="l">Charges</div><div className="v charges">₹{totalCharges.toFixed(2)}</div></div>
                               <div className="d-item"><div className="l">Net P/L</div><div className={`v ${isProfit ? 'pos' : 'neg'}`}>{isProfit ? '+' : '−'}{Math.abs(trade.netPnL).toFixed(2)}</div></div>
                             </div>
                             <div className="reason-row">
@@ -440,6 +487,30 @@ export default function Positions({ onBack }) {
                                 </div>
                               </div>
                             </div>
+
+                            {/* Show Missed Targets for Losing Trades */}
+                            {!isProfit && trade.slPrice && trade.targetPrice && (
+                              <div className="mt-3 flex justify-between items-center bg-[#14161f] border border-[#252b3d] rounded-lg p-2.5">
+                                <div className="flex-1 text-center">
+                                  <div className="text-[#5c6072] text-[9px] font-bold uppercase tracking-wide">Initial SL</div>
+                                  <div className="text-[#ff6b6b] text-xs font-mono font-bold mt-1">₹{parseFloat(trade.slPrice).toFixed(2)}</div>
+                                </div>
+                                <div className="w-[1px] h-6 bg-[#252b3d]"></div>
+                                <div className="flex-1 text-center">
+                                  <div className="text-[#5c6072] text-[9px] font-bold uppercase tracking-wide">Missed Target</div>
+                                  <div className="text-[#3ddc97] text-xs font-mono font-bold mt-1">₹{parseFloat(trade.targetPrice).toFixed(2)}</div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Display the Lesson if one was logged */}
+                            {trade.lesson && (
+                              <div className="mt-3 bg-[#14161f] border border-[#252b3d] rounded-lg p-3">
+                                <div className="text-[#5c6072] text-[9px] font-bold uppercase tracking-wide mb-1.5">Trade Lesson / Mistake</div>
+                                <div className="text-[#d5d7e0] text-xs font-medium leading-relaxed italic">"{trade.lesson}"</div>
+                              </div>
+                            )}
+
                           </div>
                         </div>
                       </div>
@@ -453,13 +524,15 @@ export default function Positions({ onBack }) {
 
         {/* BOTTOM SHEET MODAL */}
         {exitModalPos && (
-          <div className="overlay" onClick={(e) => {
-            if(e.target === e.currentTarget) {
-              setExitModalPos(null);
-              setShowCustomReason(false);
-              setCustomReasonText("");
-            }
-          }}>
+          <div
+            className="overlay"
+            onClick={(e) => {
+              if(e.target === e.currentTarget) {
+                setExitModalPos(null);
+                setShowCustomReason(false);
+              }
+            }}
+          >
             <div className="sheet">
               <div className="sheet-title">Exit reason</div>
               <div className="sheet-sub">Why are you exiting {exitModalPos.symbol} {exitModalPos.strike} {exitModalPos.type}?</div>
@@ -467,39 +540,78 @@ export default function Positions({ onBack }) {
               {!showCustomReason ? (
                 <>
                   <button className="reason-btn" onClick={() => handleExitTrade('Stop Loss Hit')}>
-                    <span>Stop Loss Hit</span><span className="arrow">›</span>
+                    <span>Stop Loss Hit <span className="text-[#6e7284] text-[10px] ml-2">(Auto-exits at ₹{parseFloat(exitModalPos.slPrice || exitModalPos.stopLoss || 0).toFixed(2)})</span></span>
+                    <span className="arrow">›</span>
                   </button>
                   <button className="reason-btn" onClick={() => handleExitTrade('Target Hit')}>
-                    <span>Target Hit</span><span className="arrow">›</span>
+                    <span>Target Hit <span className="text-[#6e7284] text-[10px] ml-2">(Auto-exits at ₹{parseFloat(exitModalPos.targetPrice || exitModalPos.target || 0).toFixed(2)})</span></span>
+                    <span className="arrow">›</span>
                   </button>
                   <button className="reason-btn" onClick={() => setShowCustomReason(true)}>
-                    <span>Other Reason</span><span className="arrow">›</span>
+                    <span>Manual / Other Reason</span><span className="arrow">›</span>
                   </button>
                 </>
               ) : (
-                <>
+                <div className="animate-in fade-in zoom-in-95 duration-200">
                   <input
+                    autoFocus
                     type="text"
-                    placeholder="Type reason here..."
+                    placeholder="E.g. Trend reversal, Boring market..."
+                    className="custom-reason-input"
                     value={customReasonText}
                     onChange={(e) => setCustomReasonText(e.target.value)}
-                    className="reason-input"
-                    autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleExitTrade(customReasonText || 'Manual Exit') }}
                   />
                   <button
-                    className="confirm-btn"
-                    onClick={() => handleExitTrade(customReasonText.trim() || 'Manual')}
+                    className="submit-reason-btn"
+                    onClick={() => handleExitTrade(customReasonText || 'Manual Exit')}
                   >
                     Confirm Exit
                   </button>
-                </>
+                </div>
               )}
 
-              <button className="cancel-btn" onClick={() => {
-                setExitModalPos(null);
-                setShowCustomReason(false);
-                setCustomReasonText("");
-              }}>Cancel</button>
+              <button className="cancel-btn" onClick={() => { setExitModalPos(null); setShowCustomReason(false); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* POST-TRADE REFLECTION MODAL */}
+        {postTradeModalId && (
+          <div
+            className="overlay"
+            onClick={(e) => {
+              if(e.target === e.currentTarget) {
+                setPostTradeModalId(null);
+                setTradeLessonText('');
+              }
+            }}
+          >
+            <div className="sheet">
+              <div className="sheet-title text-[#ff6b6b]">Trade Reflection</div>
+              <div className="sheet-sub">You exited without hitting your target. What went wrong or what did you learn from this trade?</div>
+
+              <div className="animate-in fade-in zoom-in-95 duration-200">
+                <textarea
+                  autoFocus
+                  placeholder="E.g. Entered too early, ignored resistance level, got chopped out..."
+                  className="lesson-textarea"
+                  value={tradeLessonText}
+                  onChange={(e) => setTradeLessonText(e.target.value)}
+                ></textarea>
+                <button
+                  className="submit-lesson-btn"
+                  onClick={handleSaveLesson}
+                >
+                  Save Lesson
+                </button>
+                <button
+                  className="cancel-btn"
+                  onClick={() => { setPostTradeModalId(null); setTradeLessonText(''); }}
+                >
+                  Skip for now
+                </button>
+              </div>
             </div>
           </div>
         )}
