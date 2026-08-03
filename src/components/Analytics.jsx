@@ -48,7 +48,8 @@ export default function Analytics({ onBack }) {
   const [journalDateFilter, setJournalDateFilter] = useState(null);
   const [journalPeriod, setJournalPeriod] = useState('all');
 
-  const trades = useStore(state => state.trades || []);
+  // THE FIX: Move the fallback array OUTSIDE the Zustand selector to prevent infinite loops!
+  const trades = useStore(state => state.trades) || [];
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   // === DATA PROCESSING ENGINE ===
@@ -343,7 +344,6 @@ export default function Analytics({ onBack }) {
         .jcard.sl { border-left-color: #ff6b6b; }
         .jcard.manual { border-left-color: #f5c542; }
 
-        /* Exact Replica of Positions.jsx styles for closed trades */
         .row-main { display: flex; justify-content: space-between; align-items: center; padding: 14px; }
         .name-row { display: flex; align-items: center; }
         .pos-name { color: #d5d7e0; font-size: 14px; font-weight: 700; }

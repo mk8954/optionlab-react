@@ -6,10 +6,10 @@ const PREV_CLOSES = { NIFTY: 24105.35, BANKNIFTY: 53057.80, FINNIFTY: 23754.80, 
 
 // Index specific rules
 const INDEXES = {
-  NIFTY:      { lotSize: 65, expiry: "Weekly & Monthly (Thursday)" },
-  BANKNIFTY:  { lotSize: 30, expiry: "Monthly (Last Wednesday)" },
+  NIFTY:      { lotSize: 65, expiry: "Weekly & Monthly (Tuesday)" },
+  BANKNIFTY:  { lotSize: 30, expiry: "Monthly (Last Tuesday)" },
   FINNIFTY:   { lotSize: 60, expiry: "Monthly (Last Tuesday)" },
-  SENSEX:     { lotSize: 20, expiry: "Weekly & Monthly (Friday)" },
+  SENSEX:     { lotSize: 20, expiry: "Weekly & Monthly (Thursday)" },
 };
 
 export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectOption }) {
@@ -17,10 +17,11 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
   const marketTabRefs = useRef({});
   const spotLevelRef = useRef(null);
 
-  // Connect to Zustand Store
-  const spotLevels = useStore(state => state.settings.spotLevels);
-  const generatedExpiries = useStore(state => state.settings.generatedExpiries);
-  const selectedExpiries = useStore(state => state.settings.selectedExpiries);
+  // Connect to Zustand Store SAFELY
+  const settings = useStore(state => state.settings) || {};
+  const spotLevels = settings.spotLevels || {};
+  const generatedExpiries = settings.generatedExpiries || {};
+  const selectedExpiries = settings.selectedExpiries || {};
   const setManualExpiry = useStore(state => state.setManualExpiry);
 
   const currentSpot = spotLevels[market] || 0;
@@ -164,7 +165,7 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
                     <div className="flex justify-between items-center mb-1.5">
                       <span className="text-[13px] font-bold text-[#e2e5eb] tracking-wide">{idx}</span>
                       <span className="text-[9px] bg-[#252b3d] text-[#828b9d] px-1.5 py-0.5 rounded font-semibold tracking-wider">
-                        Exp {formatDateLabel(selectedExpiries[idx] || generatedExpiries[idx]?.[0])}
+                        Exp {formatDateLabel(selectedExpiries[idx] || (generatedExpiries[idx] ? generatedExpiries[idx][0] : ''))}
                       </span>
                     </div>
                     <div className="flex items-center space-x-1.5 font-mono">
@@ -283,9 +284,9 @@ export default function OptionChain({ onBack, initialMarket = 'NIFTY', onSelectO
                 <X onClick={() => setShowExpiryModal(false)} className="w-5 h-5 text-[#828b9d] cursor-pointer" />
               </div>
 
-              {/* Displaying Index Specific Rules */}
+              {/* SAFELY Displaying Index Specific Rules */}
               <p className="text-[#00D9B5] text-[11px] font-semibold mb-5 bg-[#00D9B5]/10 inline-block px-2 py-1 rounded">
-                {market} • {INDEXES[market]?.expiry || "Custom Expiry"}
+                {market} • {(INDEXES[market] && INDEXES[market].expiry) || "Custom Expiry"}
               </p>
 
               <label className="text-[#828b9d] text-xs font-semibold block mb-2 tracking-wide uppercase">Select Custom Date</label>

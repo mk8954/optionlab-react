@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Home, Briefcase, ArrowLeftRight, BarChart2, MoreHorizontal, FileText, Settings, PlusCircle, Sliders, Download, Info, Trash2, CheckCircle2, ChevronRight } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Home, Briefcase, ArrowLeftRight, BarChart2, MoreHorizontal, FileText, Settings, PlusCircle, Sliders, Download, Info, Trash2, CheckCircle2, ChevronRight, UploadCloud } from 'lucide-react';
 import useStore from '../store/useStore';
 
 const formatMoney = (val) => val.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -15,107 +15,119 @@ const formatDate = (dateString) => {
 export default function More({ onNavigateToHome, onNavigateToPositions, onNavigateToTrade, onNavigateToAnalytics }) {
   const [activeSheet, setActiveSheet] = useState(null);
   const [toastMsg, setToastMsg] = useState('');
+  const fileInputRef = useRef(null);
 
-  // Modals Local State
-  const [moneyMode, setMoneyMode] = useState('deposit');
-  const [moneyAmount, setMoneyAmount] = useState('');
-  const [moneyNote, setMoneyNote] = useState('');
-
-  const [editName, setEditName] = useState('');
-  const [idxName, setIdxName] = useState('');
-  const [idxLot, setIdxLot] = useState('');
-  const [idxType, setIdxType] = useState('Index');
-  const [idxExpiry, setIdxExpiry] = useState('Thursday');
-  const [confirmReset, setConfirmReset] = useState(false);
-
-  // Store Connections
   const profileName = useStore(state => state.profileName);
-  const wallet = useStore(state => state.wallet);
-  const trades = useStore(state => state.trades);
-  const statement = useStore(state => state.statement || []);
-  const settings = useStore(state => state.settings);
+  const wallet = useStore(state => state.wallet) || { availableCash: 0, investedMargin: 0 };
+  const trades = useStore(state => state.trades) || [];
+  const statement = useStore(state => state.statement) || [];
+  const settings = useStore(state => state.settings) || {};
+  const stateSnapshot = useStore(state => state);
 
   const setProfileName = useStore(state => state.setProfileName);
   const addTransaction = useStore(state => state.addTransaction);
-  const addCustomIndex = useStore(state => state.addCustomIndex);
   const resetApp = useStore(state => state.resetApp);
   const updateChargeRates = useStore(state => state.updateChargeRates);
-  const stateSnapshot = useStore(state => state);
+  const updateDefaultTrade = useStore(state => state.updateDefaultTrade);
+  const saveIndexConfig = useStore(state => state.saveIndexConfig);
 
-  // Charges Local State
-  const [chargeForm, setChargeForm] = useState(settings.chargeRates);
+  const [editName, setEditName] = useState(profileName);
+  const [moneyMode, setMoneyMode] = useState('deposit');
+  const [moneyAmount, setMoneyAmount] = useState('');
+  const [moneyNote, setMoneyNote] = useState('');
+  const [chargeForm, setChargeForm] = useState(settings.chargeRates || {});
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [defaultForm, setDefaultForm] = useState(settings.defaultTrade || { lotSize: 1, targetPct: 30, slPct: 20 });
 
-  // Calculations
+  // Index Manager State (Now with Category & Timing)
+  const allIndicesList = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX', 'MIDCPNIFTY', ...(settings.customIndices || []).map(i => i.name)];
+  const [manageIdx, setManageIdx] = useState(allIndicesList[0]);
+
+  const [idxForm, setIdxForm] = useState({
+    name: '',
+    lotSize: 25,
+    stepSize: 50,
+    expiryFreq: 'Weekly',
+    expiryDay: 'Thursday',
+    type: 'Equity Index',
+    timing: '09:15 - 15:30'
+  });
+
+  // Populate Index Editor when changing selection
+  useEffect(() => {
+    if (manageIdx === 'NEW') {
+      setIdxForm({
+        name: '', lotSize: '', stepSize: '', expiryFreq: 'Weekly', expiryDay: 'Thursday',
+        type: 'Commodity', timing: '09:00 - 23:30'
+      });
+    } else if (manageIdx) {
+      // Intelligent defaults for base indices if not previously saved
+      const isBase = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX', 'MIDCPNIFTY'].includes(manageIdx);
+      const defType = isBase ? (manageIdx === 'SENSEX' ? 'BSE Index' : 'Equity Index') : 'Commodity';
+      const defTiming = isBase ? '09:15 - 15:30' : '09:00 - 23:30';
+
+      setIdxForm({
+        name: manageIdx,
+        lotSize: settings.lotSizes?.[manageIdx] || 25,
+        stepSize: settings.stepSizes?.[manageIdx] || 50,
+        expiryFreq: settings.expiryRules?.[manageIdx]?.type || 'Weekly',
+        expiryDay: settings.expiryRules?.[manageIdx]?.day || 'Thursday',
+        type: settings.indexTypes?.[manageIdx] || defType,
+        timing: settings.tradingHours?.[manageIdx] || defTiming
+      });
+    }
+  }, [manageIdx, settings]);
+
   const tradingPL = trades.reduce((acc, t) => acc + (t.netPnL || 0), 0);
   const deposits = statement.filter(s => s.type === 'deposit').reduce((acc, s) => acc + s.amount, 0);
   const withdrawals = statement.filter(s => s.type === 'withdraw').reduce((acc, s) => acc + s.amount, 0);
 
-  // Actual P&L = Current Total Assets - Net Cash Inserted
   const currentTotalAssets = wallet.availableCash + wallet.investedMargin;
   const netCashInserted = deposits - withdrawals;
   const actualPL = currentTotalAssets - netCashInserted;
 
-  const totalIndicesTracked = 5 + (settings.customIndices?.length || 0);
+  const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 2500); };
 
-  const showToast = (msg) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 2500);
-  };
-
-  const openMoneySheet = (mode) => {
-    setMoneyMode(mode);
-    setMoneyAmount('');
-    setMoneyNote('');
-    setActiveSheet('money');
-  };
+  const openMoneySheet = (mode) => { setMoneyMode(mode); setMoneyAmount(''); setMoneyNote(''); setActiveSheet('money'); };
 
   const handleConfirmMoney = () => {
-    if (!moneyAmount || Number(moneyAmount) <= 0) {
-      showToast('Enter a valid amount');
-      return;
-    }
-    if (moneyMode === 'withdraw' && Number(moneyAmount) > wallet.availableCash) {
-      showToast('Insufficient available cash to withdraw');
-      return;
-    }
+    if (!moneyAmount || Number(moneyAmount) <= 0) return showToast('Enter a valid amount');
+    if (moneyMode === 'withdraw' && Number(moneyAmount) > wallet.availableCash) return showToast('Insufficient cash');
     addTransaction(moneyMode, moneyAmount, moneyNote);
     setActiveSheet(null);
     showToast(moneyMode === 'deposit' ? 'Money added successfully' : 'Money withdrawn successfully');
   };
 
-  const handleAddIndex = () => {
-    if (!idxName || !idxLot) {
-      showToast('Please fill all index details');
-      return;
-    }
-    addCustomIndex(idxName.toUpperCase(), idxLot, idxType, idxExpiry);
-    setIdxName(''); setIdxLot('');
-    setActiveSheet(null);
-    showToast(`${idxName.toUpperCase()} added successfully`);
-  };
-
   const handleSaveCharges = () => {
     updateChargeRates({
-      brokerage: Number(chargeForm.brokerage),
-      stt: Number(chargeForm.stt),
-      txn: Number(chargeForm.txn),
-      sebi: Number(chargeForm.sebi),
-      stamp: Number(chargeForm.stamp),
-      gst: Number(chargeForm.gst)
+      brokerage: Number(chargeForm.brokerage), stt: Number(chargeForm.stt), txn: Number(chargeForm.txn),
+      sebi: Number(chargeForm.sebi), stamp: Number(chargeForm.stamp), gst: Number(chargeForm.gst)
     });
+    setActiveSheet(null); showToast('Charge rates updated');
+  };
+
+  const handleSaveDefaults = () => {
+    updateDefaultTrade({
+      lotSize: Number(defaultForm.lotSize),
+      targetPct: Number(defaultForm.targetPct),
+      slPct: Number(defaultForm.slPct)
+    });
+    setActiveSheet(null); showToast('Default trade settings saved');
+  };
+
+  const handleSaveIndex = () => {
+    const targetName = manageIdx === 'NEW' ? idxForm.name.trim() : manageIdx;
+    if (!targetName) return showToast('Please enter an index name');
+    if (!idxForm.lotSize || !idxForm.stepSize) return showToast('Please fill all details');
+
+    saveIndexConfig(targetName, idxForm);
     setActiveSheet(null);
-    showToast('Charge rates updated successfully');
+    showToast(`${targetName} configured successfully`);
   };
 
   const handleReset = () => {
-    if (!confirmReset) {
-      showToast('Please confirm the checkbox first');
-      return;
-    }
-    resetApp();
-    setConfirmReset(false);
-    setActiveSheet(null);
-    showToast('App data erased and reset to defaults');
+    if (!confirmReset) return showToast('Please confirm the checkbox first');
+    resetApp(); setConfirmReset(false); setActiveSheet(null); showToast('App reset to defaults');
   };
 
   const handleExportBackup = () => {
@@ -123,16 +135,71 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
     const blob = new Blob([dataStr], {type: 'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `optionlab-backup-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    a.href = url; a.download = `optionlab-backup-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     showToast('Backup downloaded');
   };
 
   const handleExportStatement = () => {
-    window.print();
+    const printWin = window.open('', '_blank');
+    if (!printWin) return alert("Please allow popups to generate the PDF statement.");
+
+    const generatedStr = new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const statementHtml = [...statement].reverse().map(s => {
+      const color = s.type === 'deposit' ? '#28a745' : '#dc3545';
+      const sign = s.type === 'deposit' ? '+' : '−';
+      const title = s.type === 'deposit' ? 'Money Added' : 'Money Withdrawn';
+      return `
+        <div style="border-bottom: 1px solid #eee; padding: 15px 0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-size: 14px; font-weight: bold; color: #111;">${title}</div>
+              <div style="color: #777; font-size: 12px; margin-top: 4px;">${formatDate(s.date)} ${s.note ? `&middot; ${s.note}` : ''}</div>
+            </div>
+            <div style="font-size: 16px; font-weight: bold; color: ${color}; font-family: monospace;">${sign}Rs ${formatMoney(s.amount)}</div>
+        </div>
+      `;
+    }).join('');
+
+    const html = `
+      <!DOCTYPE html><html><head><title>OptionLab Statement</title>
+      <style>body { margin: 0; font-family: -apple-system, sans-serif; color: #333; } @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }</style>
+      </head><body>
+          <div style="background-color: #24283b; color: #ffffff; padding: 25px 40px; display: flex; justify-content: space-between; align-items: center;">
+              <div><h1 style="margin: 0; font-size: 24px; font-weight: bold; display: flex; align-items: center; gap: 8px;"><span style="color: #3ddc97;">O</span>ptionLab</h1><p style="margin: 5px 0 0 0; font-size: 14px; color: #a1a5b5;">Wallet Statement</p></div>
+              <div style="text-align: right;"><h2 style="margin: 0; font-size: 18px; color: #3ddc97;">Net: Rs ${formatMoney(deposits - withdrawals)}</h2><p style="margin: 5px 0 0 0; font-size: 12px; color: #a1a5b5;">Generated: ${generatedStr}</p></div>
+          </div>
+          <div style="padding: 40px; max-width: 800px; margin: 0 auto;">
+              <h3 style="margin-top: 0; font-size: 18px; color: #111;">Transaction History</h3>
+              <div style="border-top: 2px solid #333; margin-top: 15px;">
+                ${statementHtml || '<p style="color: #888; margin-top: 15px;">No transactions found.</p>'}
+              </div>
+          </div>
+      </body></html>
+    `;
+    printWin.document.write(html);
+    printWin.document.close(); printWin.focus();
+    setTimeout(() => printWin.print(), 250);
+  };
+
+  const handleRestoreBackup = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target.result);
+        if(imported.wallet && imported.settings) {
+          useStore.setState(imported, true);
+          showToast('Data restored successfully!');
+          setTimeout(() => window.location.reload(), 1000);
+        } else throw new Error();
+      } catch (err) {
+        showToast('Invalid backup file.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   return (
@@ -188,7 +255,6 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
         .menu-s { color: #6e7284; font-size: 10px; margin-top: 2px; }
         .menu-chev { color: #5c6072; font-size: 13px; flex-shrink: 0; }
 
-        /* Modal Overlays */
         .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
         .sheet { width: 100%; max-height: 88%; overflow-y: auto; background: #181a24; border-radius: 18px 18px 0 0; padding: 20px 22px 26px 22px; border: 1px solid rgba(255,255,255,0.06); border-bottom: none; animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -216,7 +282,6 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
         .warn-box { background: rgba(255,107,107,0.08); border: 1px solid rgba(255,107,107,0.25); border-radius: 10px; padding: 12px; color: #ff9c9c; font-size: 11.5px; line-height: 1.5; margin-top: 4px; }
         .confirm-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #cfd2dc; font-size: 11.5px; }
 
-        /* Statement Print Styles */
         .stmt-summary { display: flex; justify-content: space-between; margin-bottom: 14px; }
         .stmt-stat .l { color: #6e7284; font-size: 9.5px; }
         .stmt-stat .v { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: #cfd2dc; margin-top: 3px; }
@@ -231,17 +296,6 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
 
         .toast { position: fixed; left: 50%; bottom: 85px; transform: translateX(-50%) translateY(20px); background: #191b26; border: 1px solid rgba(61,220,151,0.3); color: #3ddc97; font-size: 12.5px; font-weight: 600; padding: 12px 18px; border-radius: 10px; opacity: 0; pointer-events: none; transition: all 0.25s ease; display: flex; align-items: center; gap: 8px; z-index: 60; }
         .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-        @media print {
-          body * { visibility: hidden; }
-          #print-statement, #print-statement * { visibility: visible; }
-          #print-statement { position: absolute; top: 0; left: 0; width: 100%; background: #fff; color: #111; padding: 20px; }
-          .stmt-summary, .stmt-row { border-color: #eee !important; }
-          .stmt-stat .v, .stmt-left .t, .stmt-amt { color: #111 !important; }
-          .stmt-stat .v.in, .stmt-amt.in { color: #10b981 !important; }
-          .stmt-stat .v.out, .stmt-amt.out { color: #ef4444 !important; }
-          .stmt-stat .l, .stmt-left .d { color: #666 !important; }
-        }
       `}</style>
 
       <div className="more-wrapper sm:max-w-md sm:mx-auto">
@@ -299,9 +353,9 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
 
           <div className="group-label">Trading Setup</div>
           <div className="menu-section">
-            <div className="menu-row" onClick={() => setActiveSheet('addindex')}>
+            <div className="menu-row" onClick={() => setActiveSheet('manageindex')}>
               <div className="menu-icon blue"><PlusCircle size={16} /></div>
-              <div className="menu-text"><div className="menu-t">Add Index</div><div className="menu-s">{totalIndicesTracked} indices tracked</div></div>
+              <div className="menu-text"><div className="menu-t">Manage Indices</div><div className="menu-s">Edit lot sizes, steps & expiries</div></div>
               <ChevronRight className="menu-chev" />
             </div>
             <div className="menu-row" onClick={() => setActiveSheet('defaults')}>
@@ -311,17 +365,24 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
             </div>
           </div>
 
-          <div className="group-label">App</div>
+          <div className="group-label">App Data</div>
           <div className="menu-section">
             <div className="menu-row" onClick={handleExportBackup}>
               <div className="menu-icon grey"><Download size={16} /></div>
-              <div className="menu-text"><div className="menu-t">Export / Backup Data</div><div className="menu-s">Download all data as JSON</div></div>
+              <div className="menu-text"><div className="menu-t">Export Backup</div><div className="menu-s">Save your data to phone</div></div>
               <ChevronRight className="menu-chev" />
             </div>
-            <div className="menu-row" onClick={() => showToast('About OptionLab · Version 1.0.0')}>
+
+            <input type="file" accept=".json" id="restore-backup" className="hidden" ref={fileInputRef} onChange={handleRestoreBackup} />
+            <div className="menu-row" onClick={() => fileInputRef.current?.click()}>
+              <div className="menu-icon grey"><UploadCloud size={16} /></div>
+              <div className="menu-text"><div className="menu-t">Restore Backup</div><div className="menu-s">Load from previous JSON</div></div>
+              <ChevronRight className="menu-chev" />
+            </div>
+
+            <div className="menu-row" onClick={() => showToast('OptionLab · Trading Simulator')}>
               <div className="menu-icon grey"><Info size={16} /></div>
               <div className="menu-text"><div className="menu-t">About &amp; Help</div><div className="menu-s">Version 1.0 · Feedback</div></div>
-              <ChevronRight className="menu-chev" />
             </div>
           </div>
 
@@ -329,31 +390,12 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
           <div className="menu-section">
             <div className="menu-row" onClick={() => setActiveSheet('reset')}>
               <div className="menu-icon red"><Trash2 size={16} /></div>
-              <div className="menu-text"><div className="menu-t" style={{color:'#ff6b6b'}}>Reset to Default</div><div className="menu-s">Erase all data — balance, trades, journal</div></div>
+              <div className="menu-text"><div className="menu-t" style={{color:'#ff6b6b'}}>Reset App</div><div className="menu-s">Erase all balance, statement &amp; trades</div></div>
               <ChevronRight className="menu-chev" />
             </div>
           </div>
 
         </div>
-
-        {/* BOTTOM TASKBAR */}
-        <nav className="absolute bottom-0 left-0 right-0 w-full bg-[#141824] border-t border-[#252b3d] flex justify-around items-center h-[72px] pb-safe z-40">
-          <button onClick={onNavigateToHome} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors">
-            <Home className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Home</span>
-          </button>
-          <button onClick={onNavigateToPositions} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors">
-            <Briefcase className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Positions</span>
-          </button>
-          <button onClick={onNavigateToTrade} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors">
-            <ArrowLeftRight className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Trade</span>
-          </button>
-          <button onClick={onNavigateToAnalytics} className="flex flex-col items-center justify-center w-16 h-full text-[#828b9d] hover:text-white transition-colors">
-            <BarChart2 className="w-5 h-5 mb-1" /><span className="text-[10px] font-medium">Analytics</span>
-          </button>
-          <button className="flex flex-col items-center justify-center w-16 h-full text-[#3ddc97]">
-            <MoreHorizontal className="w-5 h-5 mb-1" /><span className="text-[10px] font-bold">More</span>
-          </button>
-        </nav>
 
         {/* MODALS */}
         {activeSheet === 'profile' && (
@@ -392,31 +434,107 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
           </div>
         )}
 
-        {activeSheet === 'addindex' && (
+        {/* DEFAULT TRADE SETTINGS MODAL */}
+        {activeSheet === 'defaults' && (
           <div className="overlay" onClick={(e) => { if(e.target === e.currentTarget) setActiveSheet(null); }}>
             <div className="sheet">
-              <div className="sheet-title">Add Index</div>
-              <div className="sheet-sub">Track an index or commodity</div>
-              <div className="field-label">Type</div>
-              <div className="seg-row">
-                <div className={`seg-opt ${idxType === 'Index' ? 'active' : ''}`} onClick={() => setIdxType('Index')}>Index</div>
-                <div className={`seg-opt ${idxType === 'Commodity' ? 'active' : ''}`} onClick={() => setIdxType('Commodity')}>Commodity</div>
+              <div className="sheet-title">Default Trade Settings</div>
+              <div className="sheet-sub">Auto-fills when you open the trade screen</div>
+
+              <div className="flex gap-4">
+                 <div className="flex-1">
+                    <div className="field-label">Default Lot Qty</div>
+                    <input className="field-input" type="number" value={defaultForm.lotSize} onChange={e => setDefaultForm({...defaultForm, lotSize: e.target.value})} placeholder="1" />
+                 </div>
               </div>
-              <div className="field-label">Name</div>
-              <input className="field-input" type="text" value={idxName} onChange={e => setIdxName(e.target.value)} placeholder="e.g. CRUDEOIL, GOLD" />
-              <div className="field-label">Lot Size</div>
-              <input className="field-input" type="number" value={idxLot} onChange={e => setIdxLot(e.target.value)} placeholder="e.g. 75" />
-              <div className="field-label">Default Expiry Day</div>
-              <select className="field-select" value={idxExpiry} onChange={e => setIdxExpiry(e.target.value)}>
-                <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option>
-                <option>Last Tuesday</option><option>Last Thursday</option>
-              </select>
-              <div className="sheet-btn primary" onClick={handleAddIndex}>Add Index</div>
+              <div className="flex gap-4 mt-2">
+                 <div className="flex-1">
+                    <div className="field-label">Default Target (%)</div>
+                    <input className="field-input" type="number" value={defaultForm.targetPct} onChange={e => setDefaultForm({...defaultForm, targetPct: e.target.value})} placeholder="30" />
+                 </div>
+                 <div className="flex-1">
+                    <div className="field-label">Default SL (%)</div>
+                    <input className="field-input" type="number" value={defaultForm.slPct} onChange={e => setDefaultForm({...defaultForm, slPct: e.target.value})} placeholder="20" />
+                 </div>
+              </div>
+
+              <div className="sheet-btn primary mt-6" onClick={handleSaveDefaults}>Save Settings</div>
               <div className="sheet-btn secondary" onClick={() => setActiveSheet(null)}>Cancel</div>
             </div>
           </div>
         )}
 
+        {/* INDEX MANAGER MODAL (UPGRADED) */}
+        {activeSheet === 'manageindex' && (
+          <div className="overlay" onClick={(e) => { if(e.target === e.currentTarget) setActiveSheet(null); }}>
+            <div className="sheet" style={{ maxHeight: '92%' }}>
+              <div className="sheet-title">Manage Indices</div>
+              <div className="sheet-sub">Edit existing or add custom indices</div>
+
+              <div className="field-label">Select Index</div>
+              <select className="field-select mb-3" value={manageIdx} onChange={e => setManageIdx(e.target.value)}>
+                 {allIndicesList.map(i => <option key={i} value={i}>{i}</option>)}
+                 <option value="NEW">+ Add New Custom Index</option>
+              </select>
+
+              {manageIdx === 'NEW' && (
+                 <>
+                   <div className="field-label">Index Name (e.g. CRUDEOIL)</div>
+                   <input className="field-input mb-2" type="text" value={idxForm.name} onChange={e => setIdxForm({...idxForm, name: e.target.value.toUpperCase()})} placeholder="Enter name..." />
+                 </>
+              )}
+
+              <div className="flex gap-4 mt-2">
+                <div className="flex-1">
+                  <div className="field-label">Category</div>
+                  <select className="field-select" value={idxForm.type} onChange={e => setIdxForm({...idxForm, type: e.target.value})}>
+                     <option>Equity Index</option>
+                     <option>BSE Index</option>
+                     <option>Commodity</option>
+                     <option>Currency</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <div className="field-label">Trading Hours</div>
+                  <input className="field-input" type="text" value={idxForm.timing} onChange={e => setIdxForm({...idxForm, timing: e.target.value})} placeholder="e.g. 09:15 - 15:30" />
+                </div>
+              </div>
+
+              <div className="flex gap-4 mt-2">
+                <div className="flex-1">
+                  <div className="field-label">Lot Size</div>
+                  <input className="field-input" type="number" value={idxForm.lotSize} onChange={e => setIdxForm({...idxForm, lotSize: e.target.value})} placeholder="25" />
+                </div>
+                <div className="flex-1">
+                  <div className="field-label">Strike Step</div>
+                  <input className="field-input" type="number" value={idxForm.stepSize} onChange={e => setIdxForm({...idxForm, stepSize: e.target.value})} placeholder="50" />
+                </div>
+              </div>
+
+              <div className="flex gap-4 mt-2">
+                <div className="flex-1">
+                  <div className="field-label">Expiry Frequency</div>
+                  <select className="field-select" value={idxForm.expiryFreq} onChange={e => setIdxForm({...idxForm, expiryFreq: e.target.value})}>
+                     <option>Weekly</option>
+                     <option>Monthly</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <div className="field-label">Expiry Day</div>
+                  <select className="field-select" value={idxForm.expiryDay} onChange={e => setIdxForm({...idxForm, expiryDay: e.target.value})}>
+                     <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+                     <option>Thursday</option><option>Friday</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="sheet-btn primary mt-6" onClick={handleSaveIndex}>Save Configuration</div>
+              <div className="sheet-btn secondary" onClick={() => setActiveSheet(null)}>Cancel</div>
+            </div>
+          </div>
+        )}
+
+        {/* CHARGES MODAL */}
         {activeSheet === 'charges' && (
           <div className="overlay" onClick={(e) => { if(e.target === e.currentTarget) setActiveSheet(null); }}>
             <div className="sheet" style={{ maxHeight: '92%' }}>
@@ -464,12 +582,13 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
           </div>
         )}
 
+        {/* RESET APP MODAL */}
         {activeSheet === 'reset' && (
           <div className="overlay" onClick={(e) => { if(e.target === e.currentTarget) setActiveSheet(null); }}>
             <div className="sheet">
-              <div className="sheet-title" style={{color:'#ff6b6b'}}>Reset to Default</div>
+              <div className="sheet-title" style={{color:'#ff6b6b'}}>Reset App</div>
               <div className="sheet-sub">This cannot be undone</div>
-              <div className="warn-box">This will permanently erase your virtual balance, statement history, open &amp; closed positions, journal notes, and custom indices. Your app will return to a fresh install state with zero balance.</div>
+              <div className="warn-box">This permanently erases virtual balance, statement history, trades, journal notes, and settings. App will return to a fresh install state.</div>
               <label className="confirm-check cursor-pointer">
                 <input type="checkbox" checked={confirmReset} onChange={(e) => setConfirmReset(e.target.checked)} className="accent-[#ff6b6b] w-4 h-4" />
                 <span>I understand this cannot be undone</span>
@@ -480,11 +599,12 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
           </div>
         )}
 
+        {/* STATEMENT MODAL */}
         {activeSheet === 'statement' && (
           <div className="overlay" onClick={(e) => { if(e.target === e.currentTarget) setActiveSheet(null); }}>
             <div className="sheet" style={{ maxHeight: '92%' }}>
               <div className="sheet-title">Statement</div>
-              <div className="sheet-sub">Every deposit &amp; withdrawal, in order</div>
+              <div className="sheet-sub">Every deposit &amp; withdrawal</div>
 
               <div id="print-statement">
                 <div className="stmt-summary">
@@ -513,13 +633,14 @@ export default function More({ onNavigateToHome, onNavigateToPositions, onNaviga
               </div>
 
               <button className="stmt-pdf-btn w-full" onClick={handleExportStatement}>
-                <Download size={14} /> Export Statement as PDF
+                <Download size={14} /> Download PDF
               </button>
               <div className="sheet-btn secondary" onClick={() => setActiveSheet(null)}>Close</div>
             </div>
           </div>
         )}
 
+        {/* TOAST POPUP */}
         <div className={`toast ${toastMsg ? 'show' : ''}`}>
           <CheckCircle2 size={16} />
           <span>{toastMsg}</span>

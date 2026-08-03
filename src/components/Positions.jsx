@@ -16,16 +16,15 @@ const getHeldTime = (start, end) => {
   return `${m}m`;
 };
 
-// Exact Charges Calculator (Matching Trade Screen)
+// Exact Charges Calculator
 const calculateExactCharges = (premium, qty, isBuy) => {
   const turnover = premium * qty;
   const brokerage = 20;
-  const stt = isBuy ? 0 : turnover * 0.00125; // STT only on sell for options
-  const txn = turnover * 0.000495; // NSE Options txn charge
+  const stt = isBuy ? 0 : turnover * 0.00125;
+  const txn = turnover * 0.000495;
   const gst = (brokerage + txn) * 0.18;
   const sebi = turnover * 0.000001;
-  const stamp = isBuy ? turnover * 0.00003 : 0; // Stamp duty only on buy
-
+  const stamp = isBuy ? turnover * 0.00003 : 0;
   return brokerage + stt + txn + gst + sebi + stamp;
 };
 
@@ -36,32 +35,27 @@ export default function Positions({ onBack }) {
   const [ltpInputs, setLtpInputs] = useState({});
   const [now, setNow] = useState(Date.now());
 
-  // Custom Reason State
   const [showCustomReason, setShowCustomReason] = useState(false);
   const [customReasonText, setCustomReasonText] = useState('');
-
-  // Post-Trade Reflection State
   const [postTradeModalId, setPostTradeModalId] = useState(null);
   const [tradeLessonText, setTradeLessonText] = useState('');
 
-  // Force re-render every minute to update the "Held" time dynamically
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Zustand Store
-  const openPositions = useStore(state => state.openPositions || []);
-  const trades = useStore(state => state.trades || []);
-  const wallet = useStore(state => state.wallet || { investedMargin: 0, availableCash: 0 });
+  // SAFE Zustand Store Extraction (Prevents Infinite Loops)
+  const openPositions = useStore(state => state.openPositions) || [];
+  const trades = useStore(state => state.trades) || [];
+  const wallet = useStore(state => state.wallet) || { investedMargin: 0, availableCash: 0 };
+
   const updatePositionLTP = useStore(state => state.updatePositionLTP);
   const closePosition = useStore(state => state.closePosition);
   const addTradeLesson = useStore(state => state.addTradeLesson);
 
-  // Derived Stats safely
   const totalUnrealizedPnL = openPositions.reduce((acc, p) => acc + (p.runningPnL || 0), 0);
 
-  // Today's Closed Stats
   const todayStr = new Date().toISOString().split('T')[0];
   const todayTrades = trades.filter(t => t.date === todayStr);
   const netToday = todayTrades.reduce((acc, t) => acc + (t.netPnL || 0), 0);
@@ -78,28 +72,18 @@ export default function Positions({ onBack }) {
 
   const handleExitTrade = (reason, explicitPrice = null) => {
     if (exitModalPos) {
-      // Determine the precise exit price based on the reason clicked
       let exitPrice = exitModalPos.currentPremium || exitModalPos.entryPremium;
-
       const slPrice = parseFloat(exitModalPos.slPrice || exitModalPos.stopLoss);
       const tgtPrice = parseFloat(exitModalPos.targetPrice || exitModalPos.target);
 
-      if (reason === 'Stop Loss Hit' && !isNaN(slPrice)) {
-        exitPrice = slPrice;
-      } else if (reason === 'Target Hit' && !isNaN(tgtPrice)) {
-        exitPrice = tgtPrice;
-      } else if (explicitPrice !== null && !isNaN(explicitPrice)) {
-        exitPrice = explicitPrice;
-      }
+      if (reason === 'Stop Loss Hit' && !isNaN(slPrice)) exitPrice = slPrice;
+      else if (reason === 'Target Hit' && !isNaN(tgtPrice)) exitPrice = tgtPrice;
+      else if (explicitPrice !== null && !isNaN(explicitPrice)) exitPrice = explicitPrice;
 
       closePosition(exitModalPos.id, exitPrice, reason);
 
-      // If we didn't hit our target, trigger the reflection journal popup
-      if (reason !== 'Target Hit') {
-        setPostTradeModalId(exitModalPos.id);
-      }
+      if (reason !== 'Target Hit') setPostTradeModalId(exitModalPos.id);
 
-      // Reset Modal states
       setExitModalPos(null);
       setShowCustomReason(false);
       setCustomReasonText('');
@@ -107,9 +91,7 @@ export default function Positions({ onBack }) {
   };
 
   const handleSaveLesson = () => {
-    if (postTradeModalId && tradeLessonText.trim()) {
-      addTradeLesson(postTradeModalId, tradeLessonText.trim());
-    }
+    if (postTradeModalId && tradeLessonText.trim()) addTradeLesson(postTradeModalId, tradeLessonText.trim());
     setPostTradeModalId(null);
     setTradeLessonText('');
   };
@@ -122,13 +104,12 @@ export default function Positions({ onBack }) {
     return `${String(d.getDate()).padStart(2, '0')} ${months[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  // Swipe-to-go-back gesture
   const [touchStartPos, setTouchStartPos] = useState(null);
   const handleGestureStart = (e) => setTouchStartPos(e.targetTouches[0].clientX);
   const handleGestureEnd = (e) => {
     if (!touchStartPos) return;
     const distance = e.changedTouches[0].clientX - touchStartPos;
-    if (distance > 75) onBack(); // Swipe right to go back
+    if (distance > 75) onBack();
   };
 
   return (
@@ -216,12 +197,10 @@ export default function Positions({ onBack }) {
         .reason-btn .arrow { color: #5c6072; font-size: 16px;}
         .cancel-btn { width: 100%; background: none; border: none; color: #6e7284; padding: 10px 0; font-size: 13px; font-weight: 600; margin-top: 6px; cursor: pointer; }
 
-        /* Custom Reason Input */
         .custom-reason-input { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(61,220,151,0.4); border-radius: 10px; padding: 12px 14px; color: #fff; font-size: 13.5px; outline: none; margin-bottom: 8px;}
         .custom-reason-input::placeholder { color: #5c6072; }
         .submit-reason-btn { width: 100%; background: #3ddc97; color: #0a0b12; border: none; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 700; margin-bottom: 8px; cursor: pointer;}
 
-        /* Lesson Textarea */
         .lesson-textarea { width: 100%; height: 100px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,107,107,0.4); border-radius: 10px; padding: 12px 14px; color: #fff; font-size: 13.5px; outline: none; margin-bottom: 12px; resize: none; font-family: 'Inter', sans-serif;}
         .lesson-textarea::placeholder { color: #5c6072; }
         .submit-lesson-btn { width: 100%; background: #ff6b6b; color: #fff; border: none; padding: 12px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 700; margin-bottom: 8px; cursor: pointer; transition: opacity 0.2s;}
@@ -237,6 +216,11 @@ export default function Positions({ onBack }) {
         .closed-list { padding: 6px 22px 22px 22px; }
         .closed-row { border-top: 1px solid rgba(255,255,255,0.05); cursor: pointer; }
         .closed-list .closed-row:first-of-type { border-top: none; }
+
+        /* THE GREEN/RED TITLE COLOR FIX */
+        .closed-row.profit .pos-name { color: #3ddc97; }
+        .closed-row.loss .pos-name { color: #ff6b6b; }
+
         .row-main { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; }
         .name-row { display: flex; align-items: center; }
         .row-right { display: flex; align-items: center; gap: 8px; }
@@ -322,16 +306,14 @@ export default function Positions({ onBack }) {
                     const entryPremium = pos.entryPremium || 0;
                     const currentPremium = pos.currentPremium || entryPremium;
 
-                    // Strictly parse the EXACT SL and Target saved from TradeScreen
                     let sl = parseFloat(pos.slPrice || pos.stopLoss);
-                    if (isNaN(sl)) sl = entryPremium * 0.9; // Ultimate fallback if broken data
+                    if (isNaN(sl)) sl = entryPremium * 0.9;
 
                     let tgt = parseFloat(pos.targetPrice || pos.target);
                     if (isNaN(tgt)) tgt = entryPremium * 1.2;
 
-                    // Calculate Break-Even accurately
                     const buyCharges = calculateExactCharges(entryPremium, pos.qty, true);
-                    const sellCharges = calculateExactCharges(entryPremium, pos.qty, false); // Approximating sell charges at same price
+                    const sellCharges = calculateExactCharges(entryPremium, pos.qty, false);
                     const totalEstCharges = buyCharges + sellCharges;
                     const pointsNeededForBE = totalEstCharges / (pos.qty || 1);
                     const breakEvenPrice = entryPremium + pointsNeededForBE;
@@ -339,16 +321,14 @@ export default function Positions({ onBack }) {
                     let progress = ((currentPremium - sl) / (tgt - sl)) * 100;
                     progress = Math.max(0, Math.min(100, progress || 0));
 
-                    // Safely extract month from expiry
                     let expiryDisplay = pos.expiry;
                     if(pos.expiry && pos.expiry.includes('-')) {
                        const parts = pos.expiry.split('-');
-                       expiryDisplay = `${parts[0]} ${parts[1]}`; // Approx DD MMM
+                       expiryDisplay = `${parts[0]} ${parts[1]}`;
                     }
 
                     return (
                       <div key={pos.id} className="pos-card">
-
                         <div className="pos-top">
                           <div>
                             <span className="pos-name">{pos.symbol || 'OPT'} {pos.strike || 0}</span>
@@ -432,7 +412,6 @@ export default function Positions({ onBack }) {
                     const entryPremium = trade.entryPremium || 0;
                     const exitPremium = trade.exitPremium || 0;
 
-                    // safely extract total charges
                     let totalCharges = 0;
                     if (typeof trade.chargesBreakdown === 'object') {
                       totalCharges = trade.chargesBreakdown.total || 0;
@@ -447,7 +426,8 @@ export default function Positions({ onBack }) {
                     }
 
                     return (
-                      <div key={trade.tradeId} className={`closed-row ${isOpen ? 'open' : ''}`}>
+                      // THE COLOR CSS CLASSS APPLIED HERE:
+                      <div key={trade.tradeId} className={`closed-row ${isOpen ? 'open' : ''} ${isProfit ? 'profit' : 'loss'}`}>
                         <div className="row-main" onClick={() => setExpandedTradeId(isOpen ? null : trade.tradeId)}>
                           <div>
                             <div className="name-row">
@@ -488,7 +468,6 @@ export default function Positions({ onBack }) {
                               </div>
                             </div>
 
-                            {/* Show Missed Targets for Losing Trades */}
                             {!isProfit && trade.slPrice && trade.targetPrice && (
                               <div className="mt-3 flex justify-between items-center bg-[#14161f] border border-[#252b3d] rounded-lg p-2.5">
                                 <div className="flex-1 text-center">
@@ -503,7 +482,6 @@ export default function Positions({ onBack }) {
                               </div>
                             )}
 
-                            {/* Display the Lesson if one was logged */}
                             {trade.lesson && (
                               <div className="mt-3 bg-[#14161f] border border-[#252b3d] rounded-lg p-3">
                                 <div className="text-[#5c6072] text-[9px] font-bold uppercase tracking-wide mb-1.5">Trade Lesson / Mistake</div>

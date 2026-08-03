@@ -7,14 +7,16 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
-        name: 'OptionLab Trading Journal',
+        name: 'OptionLab Trading',
         short_name: 'OptionLab',
-        description: 'Professional Trading Journal',
+        description: 'Virtual Trading Simulator',
         theme_color: '#0a0b12',
         background_color: '#0a0b12',
-        display: 'standalone', // <--- This forces it to open as an app
+        display: 'standalone',
+        scope: '/optionlab-react/',
+        start_url: '/optionlab-react/',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -24,7 +26,8 @@ export default defineConfig({
           {
             src: 'pwa-512x512.png',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       }

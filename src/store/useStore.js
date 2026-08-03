@@ -7,12 +7,12 @@ const useStore = create(
       // --- APP STATE ---
       profileName: 'Mukesh Kumar',
       wallet: {
-        availableCash: 0, // Starts at 0
+        availableCash: 0,
         investedMargin: 0
       },
       openPositions: [],
       trades: [],
-      statement: [], // Tracks deposits and withdrawals
+      statement: [],
 
       // --- CONFIGURATION ---
       settings: {
@@ -25,26 +25,35 @@ const useStore = create(
         },
         selectedExpiries: {},
         generatedExpiries: {},
-        customIndices: [], // Store custom added indices
+        customIndices: [],
+        indexOrder: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX'],
+
+        // Advanced Index Engine Configuration
+        lotSizes: { NIFTY: 25, BANKNIFTY: 15, FINNIFTY: 40, SENSEX: 10, MIDCPNIFTY: 50 },
+        stepSizes: { NIFTY: 50, BANKNIFTY: 100, FINNIFTY: 50, SENSEX: 100, MIDCPNIFTY: 25 },
+        expiryRules: {},
+
+        // NEW: Market Types & Trading Rules
+        indexTypes: {},
+        tradingHours: {},
+
         defaultTrade: {
           lotSize: 1,
           targetPct: 30,
           slPct: 20
         },
-        // Dynamic Charge Rates (Brokerage in Flat Rs, others in %)
         chargeRates: {
-          brokerage: 20,      // ₹20 Flat per order leg
-          stt: 0.125,         // 0.125% on sell turnover
-          txn: 0.03503,       // 0.03503% on total turnover
-          sebi: 0.0001,       // 0.0001% on total turnover
-          stamp: 0.003,       // 0.003% on buy turnover
-          gst: 18             // 18% on (Brokerage + Txn + SEBI)
+          brokerage: 20,
+          stt: 0.125,
+          txn: 0.03503,
+          sebi: 0.0001,
+          stamp: 0.003,
+          gst: 18
         }
       },
 
       // --- ACTIONS ---
 
-      // Profile & App Settings
       setProfileName: (name) => set({ profileName: name }),
 
       updateChargeRates: (rates) => set((state) => ({
@@ -55,27 +64,47 @@ const useStore = create(
         settings: { ...state.settings, defaultTrade: { ...state.settings.defaultTrade, ...defaults } }
       })),
 
-      addCustomIndex: (name, lotSize, type, expiryDay) => set((state) => {
-        const newIndex = { name, lotSize: Number(lotSize), type, expiryDay };
+      updateIndexOrder: (newOrder) => set((state) => ({
+        settings: { ...state.settings, indexOrder: newOrder }
+      })),
+
+      // NEW: Unified Index Configurator (Handles Categories & Timings)
+      saveIndexConfig: (name, config) => set((state) => {
+        const isBase = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX', 'MIDCPNIFTY'].includes(name);
+
+        let newCustomIndices = state.settings.customIndices || [];
+        if (!isBase && !newCustomIndices.find(c => c.name === name)) {
+          newCustomIndices.push({ name });
+        }
+
+        const newSpotLevels = { ...state.settings.spotLevels };
+        if (!newSpotLevels[name]) newSpotLevels[name] = 1000;
+
+        let newIndexOrder = [...(state.settings.indexOrder || [])];
+        if (!newIndexOrder.includes(name)) newIndexOrder.push(name);
+
         return {
           settings: {
             ...state.settings,
-            customIndices: [...(state.settings.customIndices || []), newIndex],
-            spotLevels: { ...state.settings.spotLevels, [name]: 1000 }
+            customIndices: newCustomIndices,
+            spotLevels: newSpotLevels,
+            indexOrder: newIndexOrder,
+            lotSizes: { ...state.settings.lotSizes, [name]: Number(config.lotSize) },
+            stepSizes: { ...state.settings.stepSizes, [name]: Number(config.stepSize) },
+            expiryRules: {
+              ...state.settings.expiryRules,
+              [name]: { type: config.expiryFreq, day: config.expiryDay }
+            },
+            // Save the new category and timing rules
+            indexTypes: { ...state.settings.indexTypes, [name]: config.type },
+            tradingHours: { ...state.settings.tradingHours, [name]: config.timing }
           }
         };
       }),
 
-      // Wallet & Statement
       addTransaction: (type, amount, note) => set((state) => {
         const amt = Number(amount);
-        const newTx = {
-          id: Date.now(),
-          type,
-          amount: amt,
-          note,
-          date: new Date().toISOString()
-        };
+        const newTx = { id: Date.now(), type, amount: amt, note, date: new Date().toISOString() };
 
         let newCash = state.wallet.availableCash;
         if (type === 'deposit') newCash += amt;
@@ -87,7 +116,6 @@ const useStore = create(
         };
       }),
 
-      // Reset App to Default State
       resetApp: () => set((state) => ({
         wallet: { availableCash: 0, investedMargin: 0 },
         openPositions: [],
@@ -96,7 +124,6 @@ const useStore = create(
         profileName: 'Mukesh Kumar'
       })),
 
-      // Trading Actions
       updateSpotLevel: (indexName, value) => set((state) => ({
         settings: {
           ...state.settings,
@@ -111,7 +138,6 @@ const useStore = create(
         }
       })),
 
-      // Generates exact Monthly/Weekly dates based on Index
       generateExpiries: () => set((state) => {
         const exps = {};
 
@@ -122,14 +148,12 @@ const useStore = create(
           let d = new Date();
 
           if (!isLastOfMonth) {
-            // Weekly logic
             d.setDate(d.getDate() + ((targetDay + 7 - d.getDay()) % 7));
             for (let i = 0; i < count; i++) {
               dates.push(new Date(d).toISOString().split('T')[0]);
               d.setDate(d.getDate() + 7);
             }
           } else {
-            // Monthly logic (Last occurrence of day in month)
             for (let i = 0; i < count; i++) {
               let nextMonth = new Date(d.getFullYear(), d.getMonth() + i + 1, 0);
               while (nextMonth.getDay() !== targetDay) {
@@ -141,18 +165,21 @@ const useStore = create(
           return dates;
         };
 
-        exps['NIFTY'] = getNextDates('Thursday', 4, false); // Weekly
-        exps['SENSEX'] = getNextDates('Friday', 4, false); // Weekly
-        exps['MIDCPNIFTY'] = getNextDates('Monday', 4, false); // Weekly
-        exps['FINNIFTY'] = getNextDates('Tuesday', 4, true); // Monthly
-        exps['BANKNIFTY'] = getNextDates('Wednesday', 4, true); // Monthly
+        const baseRules = {
+          NIFTY: { type: 'Weekly', day: 'Thursday' },
+          BANKNIFTY: { type: 'Monthly', day: 'Wednesday' },
+          FINNIFTY: { type: 'Monthly', day: 'Tuesday' },
+          SENSEX: { type: 'Weekly', day: 'Friday' },
+          MIDCPNIFTY: { type: 'Weekly', day: 'Monday' }
+        };
 
-        // Custom Indices
-        const customIndices = state.settings.customIndices || [];
-        customIndices.forEach(idx => {
-           const dayStr = idx.expiryDay.includes('Last') ? idx.expiryDay.split(' ')[1] : idx.expiryDay;
-           const isLast = idx.expiryDay.includes('Last');
-           exps[idx.name] = getNextDates(dayStr, 4, isLast);
+        const customRules = state.settings.expiryRules || {};
+        const activeRules = { ...baseRules, ...customRules };
+
+        Object.keys(activeRules).forEach(idxName => {
+          const rule = activeRules[idxName];
+          const isLast = rule.type === 'Monthly';
+          exps[idxName] = getNextDates(rule.day, 4, isLast);
         });
 
         return { settings: { ...state.settings, generatedExpiries: exps } };
@@ -193,24 +220,17 @@ const useStore = create(
         if (!pos) return state;
 
         const grossPnL = (exitPremium - pos.entryPremium) * pos.qty;
-
-        // === DYNAMIC EXACT CHARGES MATH ===
         const rates = state.settings.chargeRates;
 
         const buyTurnover = pos.entryPremium * pos.qty;
         const sellTurnover = exitPremium * pos.qty;
         const totalTurnover = buyTurnover + sellTurnover;
 
-        // Brokerage is flat per leg (2 legs: Buy & Sell)
         const bro = Number(rates.brokerage) * 2;
-
-        // Percentages divided by 100 for actual math
         const stt = sellTurnover * (Number(rates.stt) / 100);
         const txn = totalTurnover * (Number(rates.txn) / 100);
         const sebi = totalTurnover * (Number(rates.sebi) / 100);
         const stamp = buyTurnover * (Number(rates.stamp) / 100);
-
-        // GST applied to taxable components
         const gst = (bro + txn + sebi) * (Number(rates.gst) / 100);
 
         const totalCharges = bro + stt + txn + sebi + stamp + gst;
@@ -229,9 +249,7 @@ const useStore = create(
           exitTime: new Date().toISOString(),
           grossPnL,
           netPnL,
-          chargesBreakdown: {
-            bro, stt, txn, sebi, stamp, gst, total: totalCharges
-          },
+          chargesBreakdown: { bro, stt, txn, sebi, stamp, gst, total: totalCharges },
           entryReason: pos.entryReason,
           exitReason,
           exitNote,
@@ -256,9 +274,7 @@ const useStore = create(
       }))
 
     }),
-    {
-      name: 'optionlab-storage-v5', // Bumped to v5 to apply new dynamic charges structure
-    }
+    { name: 'optionlab-storage-v7' } // Bumped version to initialize new timing data
   )
 );
 

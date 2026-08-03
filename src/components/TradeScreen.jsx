@@ -5,20 +5,29 @@ import useStore from '../store/useStore';
 export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeExecute }) {
   // Connect to Zustand Database
   const executeTrade = useStore(state => state.executeTrade);
-  const availableCash = useStore(state => state.wallet.availableCash);
-  const lotSizes = useStore(state => state.settings.lotSizes);
+  const availableCash = useStore(state => state.wallet?.availableCash || 0);
 
-  // Dynamic Data from Option Chain
-  const { market, expiry, strike, type, price } = optionData;
+  // CRITICAL FIX: Safe Fallback for settings to prevent caching crashes!
+  const settings = useStore(state => state.settings || {});
+  const lotSizes = settings.lotSizes || {};
 
-  // Dynamically pull lot size from the global store settings
+  // Dynamic Data from Option Chain with Safe Fallbacks
+  const safeData = optionData || {};
+  const market = safeData.market || safeData.symbol || 'NIFTY';
+  const expiry = safeData.expiry || 'Expiry';
+  const strike = safeData.strike || 0;
+  const type = safeData.type || 'CE';
+  const price = safeData.price || safeData.ltp || safeData.premium || 0;
+
+  // Dynamically pull lot size from the global store, fallback to 25 if missing
   const lotSize = lotSizes[market] || 25;
 
   // Local State
   const [lots, setLots] = useState(1);
-  const [premiumInput, setPremiumInput] = useState(''); // Empty initially so placeholder shows
+  const [premiumInput, setPremiumInput] = useState('');
   const [slPercent, setSlPercent] = useState(10);
   const [targetPercent, setTargetPercent] = useState(20);
+
   const [showSmartOrders, setShowSmartOrders] = useState(true);
   const [showCharges, setShowCharges] = useState(false);
 
@@ -26,11 +35,17 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
   const [selectedReasons, setSelectedReasons] = useState(['Breakout']);
   const [customReason, setCustomReason] = useState('');
 
-  // Update premium input if optionData changes (resets to placeholder)
+  // Update premium input & pull defaults if optionData changes
   useEffect(() => {
     setPremiumInput('');
-    setLots(1); // Reset lots when switching options
-  }, [price, strike]);
+    if (settings.defaultTrade) {
+      setLots(Number(settings.defaultTrade.lotSize) || 1);
+      setSlPercent(Number(settings.defaultTrade.slPct) || 20);
+      setTargetPercent(Number(settings.defaultTrade.targetPct) || 30);
+    } else {
+      setLots(1);
+    }
+  }, [price, strike, settings]);
 
   // Swipe-to-go-back gesture
   const [touchStartPos, setTouchStartPos] = useState(null);
@@ -41,7 +56,7 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
     if (distance < -75) onBack();
   };
 
-  // Long press timer for Expiry Config
+  // Long press timer for Config Modal
   const pressTimer = useRef(null);
   const handleExpiryTouchStart = () => {
     pressTimer.current = setTimeout(() => {
@@ -52,20 +67,26 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
     if (pressTimer.current) clearTimeout(pressTimer.current);
   };
 
+  // Charge Calculation Engine
   const calcCharges = (buyPrice, sellPrice, q, isRoundTrip = true) => {
+    const rates = settings.chargeRates || { brokerage: 20, stt: 0.125, txn: 0.03503, sebi: 0.0001, stamp: 0.003, gst: 18 };
+
     const buyTO = buyPrice * q;
     const sellTO = isRoundTrip ? (sellPrice * q) : 0;
     const totalTO = buyTO + sellTO;
-    const bro = isRoundTrip ? 40.00 : 20.00;
-    const stt = Math.round((sellTO * 0.0015) * 100) / 100;
-    const txn = Math.round((totalTO * 0.0003503) * 100) / 100;
-    const sebi = Math.round((totalTO * 0.000001) * 100) / 100;
-    const stamp = Math.round((buyTO * 0.00003) * 100) / 100;
-    const gst = Math.round(((bro + txn + sebi) * 0.18) * 100) / 100;
+
+    const bro = isRoundTrip ? (Number(rates.brokerage) * 2) : Number(rates.brokerage);
+    const stt = (sellTO * (Number(rates.stt) / 100));
+    const txn = (totalTO * (Number(rates.txn) / 100));
+    const sebi = (totalTO * (Number(rates.sebi) / 100));
+    const stamp = (buyTO * (Number(rates.stamp) / 100));
+    const gst = (bro + txn + sebi) * (Number(rates.gst) / 100);
+
     const total = bro + stt + txn + sebi + stamp + gst;
     return { bro, stt, txn, sebi, stamp, gst, total };
   };
 
+  // derived metrics
   const numPremium = premiumInput !== '' ? Number(premiumInput) : Number(price);
   const qty = lots * lotSize;
   const marginReq = qty * numPremium;
@@ -104,9 +125,11 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
   };
 
   const handleExecute = () => {
-    if (availableCash < marginReq) return; // Prevent execution if insufficient funds
+    if (availableCash < marginReq) {
+        alert("Insufficient Virtual Balance! Go to 'More' tab to add funds.");
+        return;
+    }
 
-    // Save trade to the Database
     executeTrade({
       symbol: market,
       expiry: expiry,
@@ -115,22 +138,21 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
       buySell: 'BUY',
       qty: qty,
       entryPremium: numPremium,
-      ltp: numPremium, // Initial LTP is entry price
-      entryReason: selectedReasons.join(', '),
+      ltp: numPremium,
+      entryReason: selectedReasons.join(', ') || 'Manual',
       slPercent,
       targetPercent,
-      slPrice: parseFloat(slPrice), // NEW: Save exact SL price
-      targetPrice: parseFloat(targetPrice), // NEW: Save exact Target price
+      slPrice: parseFloat(slPrice),
+      targetPrice: parseFloat(targetPrice),
       entryTime: new Date().toISOString()
     });
 
-    if (onTradeExecute) onTradeExecute(); // Navigate to positions tab
+    if (onTradeExecute) onTradeExecute();
   };
 
   return (
     <>
       <style>{`
-        /* Remove spinner from number inputs */
         input[type="number"]::-webkit-inner-spin-button,
         input[type="number"]::-webkit-outer-spin-button {
           -webkit-appearance: none;
@@ -140,12 +162,12 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
           -moz-appearance: textfield;
         }
       `}</style>
+
       <div
-        className="flex flex-col h-screen w-full sm:max-w-md sm:mx-auto bg-[#141824] text-[#e2e5eb] font-sans relative overflow-hidden"
+        className="flex flex-col h-[100dvh] w-full sm:max-w-md sm:mx-auto bg-[#141824] text-[#e2e5eb] font-sans relative overflow-hidden"
         onTouchStart={handleGestureStart}
         onTouchEnd={handleGestureEnd}
       >
-        {/* Header (Corrected tags) */}
         <header className="px-4 py-4 flex items-center justify-between bg-[#141824] shrink-0 z-20">
           <div className="flex items-center space-x-4">
             <ArrowLeft onClick={onBack} className="w-5 h-5 text-white cursor-pointer hover:text-[#35b89e] transition-colors" />
@@ -160,7 +182,7 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
                 onTouchStart={handleExpiryTouchStart}
                 onTouchEnd={handleExpiryTouchEnd}
                 className="text-[#828b9d] text-[11px] mt-0.5 cursor-pointer hover:text-[#35b89e] active:scale-95 transition-all select-none inline-block font-medium"
-                title="Long press to edit expiry"
+                title="Long press to edit spot"
               >
                 {expiry} {strike} {type}
               </p>
@@ -168,7 +190,6 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
           </div>
         </header>
 
-        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-4 pb-32">
 
           <div className="grid grid-cols-2 gap-4 mb-6 mt-1">
@@ -296,7 +317,7 @@ export default function TradeScreen({ onBack, optionData, onOpenConfig, onTradeE
         </div>
 
         {/* BOTTOM FIXED ACTION BAR */}
-        <div className="absolute bottom-0 w-full bg-[#181c2a] border-t border-[#252b3d] p-4 z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+        <div className="absolute bottom-0 left-0 right-0 w-full bg-[#181c2a] border-t border-[#252b3d] p-4 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
            <div className="flex justify-between items-end mb-4 px-1">
              <div>
                <p className="text-[#828b9d] text-[11px] mb-1 font-semibold uppercase tracking-wide">Margin Required</p>
